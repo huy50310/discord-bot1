@@ -18,7 +18,7 @@
     "@google/generative-ai": "^0.21.0",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "@discordjs/voice": "^0.16.0",
+    "@discordjs/voice": "^0.17.0",
     "ziplayer": "^0.2.1",
     "@ziplayer/extension": "^0.1.1",
     "@ziplayer/plugin": "^0.1.51",
