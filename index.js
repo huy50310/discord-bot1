@@ -208,7 +208,7 @@ client.on(Events.MessageCreate, async (message) => {
       const duration = unit === "s" ? value * 1000 :
                        unit === "m" ? value * 60000 :
                        unit === "h" ? value * 3600000 :
-                        unit === "d" ? value * 86400000;
+                                    ?  value * 86400000;
 
       await member.timeout(duration, reason);
       return message.reply(`🤐 Đã mute **${member.user.tag}** trong **${timeArg}**`);
