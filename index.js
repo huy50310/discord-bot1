@@ -113,8 +113,36 @@ const client = new Client({
   ],
 });
 
+// =======================
+//  BOT READY + RANDOM STATUS
+// =======================
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
+
+  // Danh sách status dễ thương
+  const statuses = [
+    { name: "bên cạnh bạn 💛", type: 4 },
+    { name: "âm nhạc nhẹ nhàng 🎶", type: 2 },
+    { name: "thế giới rộng lớn 🌍", type: 3 },
+    { name: "server này nè 💕", type: 3 },
+    { name: "tâm sự với bạn 🌙", type: 4 },
+    { name: "để ý bạn từ xa 👀", type: 3 },
+    { name: "mong bạn hạnh phúc ✨", type: 4 },
+    { name: "cùng bạn học bài 📚", type: 0 },
+    { name: "yêu đời cùng bạn 🌸", type: 4 }
+  ];
+
+  function updateStatus() {
+    const random = statuses[Math.floor(Math.random() * statuses.length)];
+    client.user.setPresence({
+      status: "online",
+      activities: [random]
+    });
+    console.log(`🎀 Status changed → ${random.name}`);
+  }
+
+  updateStatus(); // chạy ngay khi bot bật
+  setInterval(updateStatus, 5 * 60 * 1000); // đổi mỗi 5 phút
 });
 
 // =======================
@@ -159,7 +187,7 @@ client.on(Events.MessageCreate, async (message) => {
 
   let content = message.content || "";
 
-  // FIX auto mention + prefix
+  // REMOVE AUTO MENTION WHEN USING PREFIX :L
   if (content.includes(`<@${client.user.id}>`) && content.startsWith(':L')) {
     content = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
@@ -192,7 +220,7 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
-  // BOT MENTION → ADMIN COMMANDS + AI
+  // MENTION BOT → ADMIN COMMANDS + AI
   const isMentioned = message.mentions.users.has(client.user.id);
   if (isMentioned) {
 
