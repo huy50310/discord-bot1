@@ -2,14 +2,6 @@ require("dotenv").config();
 const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 
 const commands = [
-  new SlashCommandBuilder()
-    .setName("ask")
-    .setDescription("Hỏi bất kỳ điều gì bot sẽ trả lời bằng Gemini")
-    .addStringOption(option =>
-      option.setName("question")
-        .setDescription("Câu hỏi của bạn")
-        .setRequired(true)
-    ),
 
   new SlashCommandBuilder()
     .setName("say")
@@ -53,3 +45,4 @@ async function deploy() {
 }
 
 deploy();
+
