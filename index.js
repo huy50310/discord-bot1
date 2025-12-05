@@ -9,7 +9,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Gemini client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL_NAME = "gemini-3.0-pro"; // Model hợp lệ
+const MODEL_NAME = "gemini-pro-latest"; // Model hợp lệ
 
 // Lưu lịch sử chat của từng user
 const memory = {};
@@ -110,6 +110,7 @@ async function runGemini(message, question) {
 // LOGIN BOT
 // ------------------------------
 client.login(process.env.TOKEN);
+
 
 
 
