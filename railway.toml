@@ -3,9 +3,10 @@ builder = "NIXPACKS"
 
 [nixpacks]
 packages = [
-  "libsodium",
-  "opusTools",
-  "ffmpeg"
+  "libsodium",      # encryption
+  "libopus",        # opus encoder cho voice
+  "opusTools",      # hỗ trợ thêm cho play-dl
+  "ffmpeg"          # stream audio
 ]
 
 [env]
