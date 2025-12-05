@@ -12,83 +12,82 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 // =======================
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Model ưu tiên & fallback
-const PRIMARY_MODEL   = "gemini-2.5-flash";       // nhanh nhất
-const SECOND_MODEL    = "gemini-2.5-flash-lite";  // dự phòng nhanh
-const FALLBACK_MODEL  = "gemini-pro-latest";      // dự phòng cuối
+const PRIMARY_MODEL = "gemini-2.5-flash-lite";   // ưu tiên
+const SECOND_MODEL  = "gemini-2.5-flash";        // dự phòng
+const FALLBACK_MODEL = "gemini-pro-latest";      // fallback cuối
 
-// Lịch sử chat theo user
 const userChatHistory = new Map();
 
-// Helper gọi AI
-async function tryGenerate(modelName, slimHistory, prompt) {
+// Helper gọi 1 model
+async function tryModel(modelName, history, prompt) {
   const model = genAI.getGenerativeModel({ model: modelName });
 
   return await model.generateContent({
     contents: [
-      ...slimHistory,
+      ...history,
       { role: "user", parts: [{ text: prompt }] }
     ]
   });
 }
 
-// Main AI handler
+// =======================
+//  AI HANDLER (TỐI ƯU TỐC ĐỘ + GIỮ CẢM XÚC)
+// =======================
 async function runGemini(userId, prompt) {
   try {
-    // nếu user chưa có history
     if (!userChatHistory.has(userId)) {
       userChatHistory.set(userId, [
-        { role: "user", parts: [{ text: "Hãy trả lời thân thiện, ngắn gọn, giống người thật." }] }
+        { 
+          role: "user", 
+          parts: [{ 
+            text: "Hãy trả lời thân thiện, giống người thật, có cảm xúc, giữ giọng văn gần gũi." 
+          }] 
+        }
       ]);
     }
 
-    // lấy history
     const history = userChatHistory.get(userId);
 
-    // chỉ lấy 8 tin gần nhất để tăng tốc
+    // 🔥 gửi 8 tin gần nhất → tốc độ nhanh
     const slimHistory = history.slice(-8);
 
     let result;
 
-    // ============================================
-    // 1) Thử 2 lần với gemini-2.5-flash
-    // ============================================
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    // 1️⃣ thử flash-lite
+    try {
+      console.log("▶ Dùng flash-lite...");
+      result = await tryModel(PRIMARY_MODEL, slimHistory, prompt);
+      console.log("✔ Thành công flash-lite");
+    } catch (err) {
+      console.warn("⚠ flash-lite lỗi:", err.message);
+    }
+
+    // 2️⃣ nếu flash-lite fail → flash
+    if (!result) {
       try {
-        console.log(`▶ Thử flash (lần ${attempt})`);
-        result = await tryGenerate(PRIMARY_MODEL, slimHistory, prompt);
-        console.log("✔ Dùng flash thành công!");
-        break;
+        console.log("▶ Chuyển sang flash...");
+        result = await tryModel(SECOND_MODEL, slimHistory, prompt);
+        console.log("✔ Thành công flash");
       } catch (err) {
-        console.warn(`⚠ Flash lỗi lần ${attempt}:`, err.message);
+        console.warn("⚠ flash lỗi:", err.message);
       }
     }
 
-    // ============================================
-    // 2) Nếu flash vẫn lỗi → thử flash-lite
-    // ============================================
+    // 3️⃣ fallback cuối → pro-latest
     if (!result) {
       try {
-        console.log("▶ Chuyển sang flash-lite...");
-        result = await tryGenerate(SECOND_MODEL, slimHistory, prompt);
-        console.log("✔ Dùng flash-lite thành công!");
+        console.log("▶ Fallback → pro-latest...");
+        result = await tryModel(FALLBACK_MODEL, slimHistory, prompt);
+        console.log("✔ Thành công pro-latest");
       } catch (err) {
-        console.warn("⚠ Flash-lite lỗi:", err.message);
+        console.warn("❌ pro-latest lỗi:", err.message);
+        return "❌ Hệ thống AI đang quá tải, thử lại sau nhé!";
       }
-    }
-
-    // ============================================
-    // 3) Fallback cuối cùng → gemini-pro-latest
-    // ============================================
-    if (!result) {
-      console.log("▶ Fallback → gemini-pro-latest...");
-      result = await tryGenerate(FALLBACK_MODEL, slimHistory, prompt);
-      console.log("✔ Dùng pro-latest thành công!");
     }
 
     const response = result.response.text();
 
-    // lưu lại history local
+    // lưu lịch sử
     history.push({ role: "user", parts: [{ text: prompt }] });
     history.push({ role: "model", parts: [{ text: response }] });
 
@@ -96,7 +95,7 @@ async function runGemini(userId, prompt) {
 
   } catch (err) {
     console.error("Gemini error:", err);
-    return "❌ Bot bị lỗi AI, thử lại sau.";
+    return "❌ Bot không thể kết nối AI.";
   }
 }
 
@@ -160,12 +159,12 @@ client.on(Events.MessageCreate, async (message) => {
 
   let content = message.content || "";
 
-  // FIX prefix bị dính mention
+  // FIX auto mention + prefix
   if (content.includes(`<@${client.user.id}>`) && content.startsWith(':L')) {
     content = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
 
-  // PREFIX COMMANDS :L
+  // PREFIX :L
   if (content.startsWith(':L ') || content.startsWith(':l ')) {
 
     const args = content.slice(3).trim().split(/ +/);
@@ -193,7 +192,7 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
-  // BOT MENTION → AI CHAT
+  // BOT MENTION → ADMIN COMMANDS + AI
   const isMentioned = message.mentions.users.has(client.user.id);
   if (isMentioned) {
 
@@ -207,25 +206,28 @@ client.on(Events.MessageCreate, async (message) => {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       
       await message.reply("🔌 Bot đang tắt...");
-      console.log("Bot shutdown bởi admin.");
+      console.log("Bot tắt theo yêu cầu admin.");
       return process.exit(0);
     }
 
-    // ADMIN COMMANDS (ban, unban, mute… giữ nguyên)
+    // BAN
     if (command === "ban") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
+
       const member = message.mentions.members.first();
       const reason = args.slice(1).join(" ") || "Không có lý do.";
 
-      if (!member) return message.reply("⚠ Tag người cần ban.");
+      if (!member) return message.reply("⚠ Bạn phải tag người cần ban.");
       if (!member.bannable) return message.reply("❌ Không thể ban.");
 
       await member.ban({ reason });
       return message.reply(`🔨 Đã ban **${member.user.tag}**\n📝 ${reason}`);
     }
 
+    // UNBAN
     if (command === "unban") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
+
       const userId = args[0];
       if (!userId) return message.reply("⚠ Nhập user ID.");
 
@@ -233,6 +235,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`♻️ Đã unban ID: **${userId}**`);
     }
 
+    // MUTE
     if (command === "mute") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
 
@@ -241,24 +244,26 @@ client.on(Events.MessageCreate, async (message) => {
       const reason = args.slice(2).join(" ") || "Không có lý do.";
 
       if (!member) return message.reply("⚠ Tag người cần mute.");
-      if (!timeArg) return message.reply("⚠ Nhập thời gian: 10s, 5m, 2h");
+      if (!timeArg) return message.reply("⚠ Nhập thời gian. Ví dụ: 10s, 5m, 2h");
       if (!member.moderatable) return message.reply("❌ Không thể mute.");
 
       const match = timeArg.match(/^(\d+)(s|m|h|d)$/i);
-      if (!match) return message.reply("⚠ Sai định dạng.");
+      if (!match) return message.reply("⚠ Sai định dạng 10s, 5m, 2h");
 
       const value = parseInt(match[1]);
       const unit = match[2].toLowerCase();
 
-      const duration = unit === "s" ? value * 1000 :
-                       unit === "m" ? value * 60000 :
-                       unit === "h" ? value * 3600000 :
-                       value * 86400000;
+      const duration =
+        unit === "s" ? value * 1000 :
+        unit === "m" ? value * 60000 :
+        unit === "h" ? value * 3600000 :
+                        value * 86400000;
 
       await member.timeout(duration, reason);
       return message.reply(`🤐 Mute **${member.user.tag}** trong **${timeArg}**`);
     }
 
+    // UNMUTE
     if (command === "unmute") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       
