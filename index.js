@@ -14,6 +14,21 @@ const {
   getVoiceConnection
 } = require("@discordjs/voice");
 const play = require("play-dl");
+const fs = require("fs");
+
+(async () => {
+  try {
+    const cookies = JSON.parse(fs.readFileSync("./youtube-cookies.json"));
+    await play.setToken({
+      youtube: {
+        cookie: cookies.cookie
+      }
+    });
+    console.log("🍪 YouTube cookies loaded thành công!");
+  } catch (e) {
+    console.log("⚠️ Không tìm thấy youtube-cookies.json hoặc cookie lỗi.");
+  }
+})();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // =============== CONFIG ===============
@@ -703,3 +718,4 @@ client.on(Events.MessageCreate, async (message) => {
 
 // LOGIN
 client.login(TOKEN);
+
