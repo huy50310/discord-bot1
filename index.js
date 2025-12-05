@@ -149,7 +149,7 @@ client.on(Events.MessageCreate, async (message) => {
 
   try {
     const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash-latest"
+      model: "gemini-pro"
     });
 
     const response = await model.generateContent({
@@ -175,3 +175,4 @@ client.on(Events.MessageCreate, async (message) => {
 //  LOGIN
 // =========================
 client.login(TOKEN);
+
