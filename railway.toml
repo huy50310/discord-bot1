@@ -1,16 +1,12 @@
 [build]
 builder = "NIXPACKS"
 
+[env]
+NODE_VERSION = "20"
+
 [nixpacks]
-packages = [
-  "libsodium",
-  "libopus",
-  "opusTools",
-  "ffmpeg"
-]
+[nixpacks.pkg]
+addPkgs = ["libsodium", "ffmpeg"]
 
 [phases.install]
 cmds = ["npm install"]
-
-[env]
-NODE_VERSION = "20"
