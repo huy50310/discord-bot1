@@ -2,7 +2,6 @@ require("dotenv").config();
 const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 
 const commands = [
-
   new SlashCommandBuilder()
     .setName("ping")
     .setDescription("Kiểm tra bot hoạt động"),
@@ -10,7 +9,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName("say")
     .setDescription("Bot nói thay bạn")
-    .addStringOption(option => 
+    .addStringOption(option =>
       option.setName("text")
         .setDescription("Nội dung muốn bot nói")
         .setRequired(true)
@@ -26,25 +25,23 @@ const commands = [
     )
     .addChannelOption(option =>
       option.setName("channel")
-        .setDescription("Kênh cần gửi thông báo")
+        .setDescription("Channel nhận thông báo")
         .setRequired(true)
-    )
-
+    ),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
 (async () => {
   try {
-    console.log("🔄 Đang cập nhật slash commands...");
-
+    console.log("⏳ Deploying slash commands...");
     await rest.put(
       Routes.applicationCommands(process.env.CLIENT_ID),
       { body: commands }
     );
 
-    console.log("✅ Slash Commands đã đăng ký thành công!");
+    console.log("✅ Deploy slash commands thành công!");
   } catch (err) {
-    console.error(err);
+    console.error("❌ Deploy FAILED:", err);
   }
 })();
