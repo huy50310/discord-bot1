@@ -212,8 +212,17 @@ client.on(Events.MessageCreate, async (message) => {
 
     return message.reply("🤖 Bạn muốn hỏi gì?");
   }
+  if (command === "shutdown") {
+  if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
+
+  await message.reply("🔌 Bot đang tắt...");
+
+  console.log("Bot shutdown theo yêu cầu admin.");
+  process.exit(0);
+}
 });
 
 
 // LOGIN BOT
 client.login(TOKEN);
+
