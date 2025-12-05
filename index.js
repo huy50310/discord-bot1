@@ -11,32 +11,63 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 //  GEMINI AI
 // =======================
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const modelName = "gemini-pro-latest";
+
+// Model chính & dự phòng
+const FAST_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-pro-latest";
 
 const userChatHistory = new Map();
 
 async function runGemini(userId, prompt) {
   try {
+    // Nếu user chưa có lịch sử → tạo mặc định
     if (!userChatHistory.has(userId)) {
       userChatHistory.set(userId, [
         { role: "user", parts: [{ text: "Hãy trả lời thân thiện, giống người thật." }] }
       ]);
     }
 
+    // Lấy lịch sử hiện tại
     const history = userChatHistory.get(userId);
-    const model = genAI.getGenerativeModel({ model: modelName });
-    const chat = model.startChat({ history });
 
-    const result = await chat.sendMessage(prompt);
+    // 🔥 Tối ưu: chỉ gửi 8 message gần nhất để bot trả lời nhanh
+    const slimHistory = history.slice(-8);
+
+    let model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    let result;
+
+    try {
+      // Thử với model nhanh nhất
+      result = await model.generateContent({
+        contents: [
+          ...slimHistory,
+          { role: "user", parts: [{ text: prompt }] }
+        ]
+      });
+    } catch (err) {
+      console.warn(`⚠ 2.5-flash bị lỗi, fallback → ${FALLBACK_MODEL}:`, err.message);
+
+      model = genAI.getGenerativeModel({ model: FALLBACK_MODEL });
+
+      result = await model.generateContent({
+        contents: [
+          ...slimHistory,
+          { role: "user", parts: [{ text: prompt }] }
+        ]
+      });
+    }
+
     const response = result.response.text();
 
+    // Lưu lịch sử chat vào RAM
     history.push({ role: "user", parts: [{ text: prompt }] });
     history.push({ role: "model", parts: [{ text: response }] });
 
     return response;
+
   } catch (err) {
     console.error("Gemini error:", err);
-    return "❌ Bot không thể kết nối.";
+    return "❌ Bot không thể kết nối AI.";
   }
 }
 
@@ -100,15 +131,14 @@ client.on(Events.MessageCreate, async (message) => {
   let content = message.content || "";
 
   // ======================================
-  //  🔥 FIX CÁCH 3: KHÔNG CHO DISCORD ÉP MENTION
-  //  Nếu Discord auto chèn mention, nhưng msg có prefix :L → xử lý prefix
+  //  FIX AUTO MENTION PREFIX :L
   // ======================================
   if (content.includes(`<@${client.user.id}>`) && content.startsWith(':L')) {
     content = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
   }
 
   // ======================================
-  //  PREFIX COMMANDS :L
+  //  PREFIX :L
   // ======================================
   if (content.startsWith(':L ') || content.startsWith(':l ')) {
 
@@ -138,7 +168,7 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   // ======================================
-  //  MENTION BOT → COMMANDS + GEMINI AI
+  //  BOT MENTION → AI CHAT
   // ======================================
   const isMentioned = message.mentions.users.has(client.user.id);
   if (isMentioned) {
@@ -149,7 +179,7 @@ client.on(Events.MessageCreate, async (message) => {
     const isAdmin = message.member.permissions.has('Administrator');
 
     // ======================
-    // 🔥 SHUTDOWN
+    // SHUTDOWN
     // ======================
     if (command === "shutdown") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
@@ -160,7 +190,7 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     // ======================
-    // ADMIN COMMANDS
+    // ADMIN COMMANDS (ban, unban, mute… giữ nguyên)
     // ======================
 
     if (command === "ban") {
@@ -234,5 +264,3 @@ client.on(Events.MessageCreate, async (message) => {
 
 // LOGIN
 client.login(TOKEN);
-
-
