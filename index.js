@@ -8,13 +8,13 @@ const {
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// Gemini client
+// --- CẤU HÌNH GEMINI ---
+// Sử dụng bản Flash để phản hồi nhanh và miễn phí/rẻ hơn
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL_NAME = "gemini-1.5-flash"; // model duy nhất tài khoản bạn hỗ trợ
+const MODEL_NAME = "gemini-1.5-flash"; 
 
-// Nhớ chat theo user
+// Lưu trữ lịch sử chat: { userId: [ { role: 'user', parts: [...] }, ... ] }
 const memory = {};
-
 
 // ===============================
 // DISCORD CLIENT
@@ -33,9 +33,8 @@ client.once(Events.ClientReady, () => {
   console.log(`🤖 Logged in as ${client.user.tag}`);
 });
 
-
 // ====================================================
-// PREFIX COMMANDS (:L) — INCLUDING ASK (GEMINI CHAT)
+// PREFIX COMMANDS (:L)
 // ====================================================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.inGuild()) return;
@@ -49,36 +48,28 @@ client.on(Events.MessageCreate, async (message) => {
     const args = content.slice(3).trim().split(/ +/);
     const command = args.shift()?.toLowerCase();
 
-    // Ai cũng dùng được
-    if (command === "ping")
+    if (command === "ping") {
       return message.channel.send("🏓 Pong!");
+    }
 
-    // ASK — CHAT AI
     if (command === "ask") {
       const question = args.join(" ");
-      if (!question)
-        return message.reply("❌ Bạn cần nhập câu hỏi. Ví dụ: `:L ask hôm nay trời sao?`");
-
+      if (!question) return message.reply("❌ Bạn cần nhập câu hỏi. Ví dụ: `:L ask hôm nay trời sao?`");
       return runGemini(message, question);
     }
 
-    // Các lệnh admin
-    if (!isAdmin)
-      return message.reply("❌ Bạn không có quyền admin.");
+    // --- Admin commands ---
+    if (!isAdmin) return message.reply("❌ Bạn không có quyền admin.");
 
-    if (command === "say")
-      return message.channel.send(args.join(" "));
-
-    if (command === "announce")
-      return message.channel.send(`📢 **Thông báo:** ${args.join(" ")}`);
-
+    if (command === "say") return message.channel.send(args.join(" "));
+    if (command === "announce") return message.channel.send(`📢 **Thông báo:** ${args.join(" ")}`);
+    
     return;
   }
 });
 
-
 // ====================================================
-// ADMIN COMMANDS VIA MENTION
+// ADMIN COMMANDS VIA MENTION & CHAT AI
 // ====================================================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.inGuild() || message.author.bot) return;
@@ -88,117 +79,133 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (!isMentioned) return;
 
-  const content = message.content
-    .replace(new RegExp(`<@!?${client.user.id}>`, "g"), "")
-    .trim();
+  // Lấy nội dung sau khi bỏ mention bot
+  const content = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
 
-  // Nếu chỉ mention → show menu
+  // Nếu chỉ tag bot mà không nói gì -> Hiện menu
   if (!content) {
     return message.reply(
       "🤖 **Menu lệnh:**\n" +
       "🔹 `:L ask <câu hỏi>` — hỏi AI\n" +
       "🔹 Tag bot + câu hỏi — hỏi AI\n" +
-      "🔹 `/say`, `/announce`, mute/ban/unban — admin"
+      "🔹 Admin: say, announce, ban, unban, mute, unmute"
     );
   }
 
+  // Tách lệnh
   const parts = content.split(/ +/);
   const command = parts.shift()?.toLowerCase();
 
-  // Admin commands qua mention
-  if (["say", "announce", "ban", "unban", "mute", "unmute"].includes(command)) {
+  // Danh sách lệnh Admin
+  const adminCmds = ["say", "announce", "ban", "unban", "mute", "unmute"];
+  
+  if (adminCmds.includes(command)) {
     if (!isAdmin) return message.reply("❌ Bạn không có quyền.");
+    
+    // Xử lý từng lệnh admin
+    if (command === "say") return message.channel.send(parts.join(" "));
+    if (command === "announce") return message.channel.send(`📢 **Thông báo:** ${parts.join(" ")}`);
+
+    if (command === "ban") {
+      const member = message.mentions.members.first();
+      if (!member) return message.reply("❌ Tag người cần ban.");
+      if (!member.bannable) return message.reply("❌ Không thể ban người này (quyền cao hơn bot).");
+      await member.ban({ reason: parts.slice(1).join(" ") || "Không có lý do" });
+      return message.reply(`🔨 Đã ban **${member.user.tag}**`);
+    }
+
+    if (command === "unban") {
+      const id = parts[0];
+      if (!id) return message.reply("❌ Nhập user ID.");
+      await message.guild.bans.remove(id).catch(() => message.reply("❌ Không thể unban (ID sai hoặc chưa bị ban)."));
+      return message.reply(`♻️ Đã unban ID: ${id}`);
+    }
+
+    if (command === "mute") {
+      const member = message.mentions.members.first();
+      const timeArg = parts[1];
+      if (!member) return message.reply("❌ Tag người cần mute.");
+      if (!timeArg) return message.reply("❌ Nhập thời gian: 10s / 5m / 1h.");
+      
+      const regex = /^(\d+)(s|m|h|d)$/i;
+      const match = timeArg.match(regex);
+      if (!match) return message.reply("❌ Sai định dạng thời gian.");
+
+      const num = parseInt(match[1]);
+      const unit = match[2].toLowerCase();
+      const ms = { s: 1000, m: 60000, h: 3600000, d: 86400000 }[unit] * num;
+
+      await member.timeout(ms).catch(e => message.reply("❌ Lỗi khi mute (có thể quyền bot thấp hơn)."));
+      return message.reply(`🤐 Đã mute **${member.user.tag}** trong ${timeArg}`);
+    }
+
+    if (command === "unmute") {
+      const member = message.mentions.members.first();
+      if (!member) return message.reply("❌ Tag người cần unmute.");
+      await member.timeout(null).catch(e => message.reply("❌ Lỗi unmute."));
+      return message.reply(`🔊 Đã unmute **${member.user.tag}**`);
+    }
+    
+    return; // Kết thúc nếu là lệnh admin
   }
 
-  if (command === "say")
-    return message.channel.send(parts.join(" "));
-
-  if (command === "announce")
-    return message.channel.send(`📢 **Thông báo:** ${parts.join(" ")}`);
-
-  if (command === "ban") {
-    const member = message.mentions.members.first();
-    if (!member) return message.reply("❌ Tag người cần ban.");
-    if (!member.bannable) return message.reply("❌ Không thể ban người này.");
-
-    await member.ban({ reason: parts.slice(1).join(" ") || "Không có lý do" });
-    return message.reply(`🔨 Đã ban **${member.user.tag}**`);
-  }
-
-  if (command === "unban") {
-    const id = parts[0];
-    if (!id) return message.reply("❌ Nhập user ID.");
-    await message.guild.bans.remove(id).catch(() => message.reply("❌ Không thể unban."));
-    return message.reply(`♻️ Đã unban ID: ${id}`);
-  }
-
-  if (command === "mute") {
-    const member = message.mentions.members.first();
-    const timeArg = parts[1];
-    if (!member) return message.reply("❌ Tag người cần mute.");
-    if (!timeArg) return message.reply("❌ Nhập thời gian: 10s / 5m / 1h.");
-
-    const matched = timeArg.match(/^(\d+)(s|m|h|d)$/i);
-    if (!matched) return message.reply("❌ Sai định dạng thời gian.");
-
-    const num = parseInt(matched[1]);
-    const unit = matched[2].toLowerCase();
-    const ms = { s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[unit] * num;
-
-    await member.timeout(ms);
-    return message.reply(`🤐 Đã mute **${member.user.tag}** trong ${timeArg}`);
-  }
-
-  if (command === "unmute") {
-    const member = message.mentions.members.first();
-    if (!member) return message.reply("❌ Tag người cần unmute.");
-    await member.timeout(null);
-    return message.reply(`🔊 Đã unmute **${member.user.tag}**`);
-  }
-
-  // Nếu không phải lệnh → dùng AI
+  // Nếu không phải lệnh Admin -> Chuyển sang chat AI
+  // Ở đây 'content' chính là câu hỏi vì ta đã strip mention ở trên
   return runGemini(message, content);
 });
 
 
 // ====================================================
-// GEMINI CHAT FUNCTION
+// GEMINI CHAT FUNCTION (ĐÃ SỬA ĐỔI)
 // ====================================================
 async function runGemini(message, question) {
   const userId = message.author.id;
 
-  if (!memory[userId]) memory[userId] = [];
-
-  memory[userId].push({ role: "user", text: question });
-  if (memory[userId].length > 10) memory[userId].shift();
+  // Khởi tạo lịch sử nếu chưa có
+  if (!memory[userId]) {
+    memory[userId] = [];
+  }
 
   await message.channel.sendTyping();
 
   try {
-    const model = genAI.getGenerativeModel({
-      model: MODEL_NAME
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+
+    // Tạo phiên chat với lịch sử hiện có
+    const chat = model.startChat({
+      history: memory[userId], // Truyền lịch sử đúng định dạng SDK
+      generationConfig: {
+        maxOutputTokens: 1000, // Giới hạn độ dài câu trả lời
+      },
     });
 
-    const result = await model.generateContent({
-      contents: memory[userId].map(m => ({
-        role: m.role,
-        parts: [{ text: m.text }]
-      }))
-    });
+    // Gửi tin nhắn mới
+    const result = await chat.sendMessage(question);
+    const response = await result.response;
+    const text = response.text();
 
-    const replyText = result.response.text();
+    // Cập nhật memory thủ công (để lưu cho lần gọi sau)
+    // Lưu User Input
+    memory[userId].push({ role: "user", parts: [{ text: question }] });
+    // Lưu Model Output
+    memory[userId].push({ role: "model", parts: [{ text: text }] });
 
-    memory[userId].push({ role: "model", text: replyText });
-    if (memory[userId].length > 10) memory[userId].shift();
+    // Giới hạn lịch sử (giữ lại 10 lượt chat gần nhất = 20 tin nhắn)
+    if (memory[userId].length > 20) {
+      memory[userId] = memory[userId].slice(-20);
+    }
 
-    return message.reply(replyText);
+    return message.reply(text);
 
   } catch (err) {
     console.error("Gemini error:", err);
-    return message.reply("❌ Bot không thể kết nối Gemini (model đang dùng: gemini-1.5-flash).");
+    
+    // Reset memory nếu lỗi do lịch sử bị hỏng
+    memory[userId] = []; 
+    
+    return message.reply("❌ Bot gặp lỗi kết nối hoặc nội dung bị chặn. (Đã reset cuộc hội thoại của bạn).");
   }
 }
-
 
 // ===============================
 // LOGIN BOT
