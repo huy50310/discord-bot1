@@ -200,7 +200,7 @@ client.on(Events.MessageCreate, async (message) => {
       if (!member.moderatable) return message.reply("❌ Không thể mute người này.");
 
       const match = timeArg.match(/^(\d+)(s|m|h|d)$/i);
-      if (!match) return message.reply("⚠ Sai định dạng: 10s, 5m, 2h, 1d");
+      if (!match) return message.reply("⚠ Sai định dạng: 10s, 5m, 2h");
 
       const value = parseInt(match[1]);
       const unit = match[2].toLowerCase();
@@ -236,3 +236,4 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.login(TOKEN);
+
