@@ -1,12 +1,15 @@
 [build]
 builder = "NIXPACKS"
 
+[nixpacks]
+packages = [
+  "libsodium",
+  "opusTools",
+  "ffmpeg"
+]
+
 [env]
 NODE_VERSION = "20"
 
-[nixpacks]
-packages = ["libsodium", "opus", "ffmpeg"]
-
-# Nếu Railway không tự install dependencies Node
 [phases.install]
 cmds = ["npm install"]
