@@ -15,62 +15,54 @@ const modelName = "gemini-pro-latest";
 
 const userChatHistory = new Map();
 
-async function runGemini(message, question) {
-  const userId = message.author.id;
-
-  // 1. Kiểm tra nếu câu hỏi rỗng thì chặn ngay
-  if (!question || question.trim().length === 0) {
-    return message.reply("❌ Bạn chưa nhập nội dung câu hỏi! Hãy nhập: `:L ask <câu hỏi>`");
-  }
-
-  // Khởi tạo bộ nhớ nếu chưa có
-  if (!memory[userId]) {
-    memory[userId] = [];
-  }
-
-  await message.channel.sendTyping();
-
+async function runGemini(userId, prompt) {
   try {
-    // 2. Lọc sạch lịch sử chat cũ để tránh lỗi "tin nhắn rỗng" còn lưu trong RAM
-    // Chỉ giữ lại các tin nhắn có text khác rỗng
-    memory[userId] = memory[userId].filter(m => m.parts && m.parts[0] && m.parts[0].text && m.parts[0].text.trim() !== "");
-
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Hoặc gemini-pro-latest tùy bạn chọn
-
-    const chat = model.startChat({
-      history: memory[userId],
-      generationConfig: {
-        maxOutputTokens: 2000,
-      },
-    });
-
-    const result = await chat.sendMessage(question);
-    const response = await result.response;
-    const text = response.text();
-
-    // 3. Chỉ lưu vào bộ nhớ nếu Bot trả lời có nội dung
-    if (text && text.trim() !== "") {
-        // Lưu câu hỏi của User
-        memory[userId].push({ role: "user", parts: [{ text: question }] });
-        // Lưu câu trả lời của Bot
-        memory[userId].push({ role: "model", parts: [{ text: text }] });
-        
-        // Giới hạn lịch sử
-        if (memory[userId].length > 20) memory[userId].shift();
+    if (!userChatHistory.has(userId)) {
+      userChatHistory.set(userId, [
+        {
+          role: "user",
+          parts: [{ text: "Từ giờ hãy trả lời thân thiện, giống người thật." }]
+        }
+      ]);
     }
 
-    return message.reply(text);
+    let history = userChatHistory.get(userId);
+
+    // Giới hạn 20 dòng history
+    if (history.length > 20) {
+      history = history.slice(history.length - 20);
+      userChatHistory.set(userId, history);
+    }
+
+    // Tạo nội dung gửi lên Gemini
+    const contents = [
+      ...history,
+      {
+        role: "user",
+        parts: [{ text: prompt }]
+      }
+    ];
+
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    // Gọi API đúng chuẩn
+    const result = await model.generateContent({
+      contents: contents
+    });
+
+    const response = result.response.text();
+
+    // Lưu lịch sử mới
+    history.push({ role: "user", parts: [{ text: prompt }] });
+    history.push({ role: "model", parts: [{ text: response }] });
+
+    userChatHistory.set(userId, history);
+
+    return response;
 
   } catch (err) {
     console.error("Gemini error:", err);
-    
-    // Nếu lỗi 400 (Bad Request), thường do lịch sử bị lỗi -> Xóa lịch sử làm lại
-    if (err.message.includes("400") || err.message.includes("data")) {
-        memory[userId] = []; // Reset bộ nhớ
-        return message.reply("⚠️ Đã xảy ra lỗi dữ liệu hội thoại. Bot đã tự động làm mới phiên chat. Hãy hỏi lại nhé!");
-    }
-
-    return message.reply("❌ Bot gặp lỗi kết nối.");
+    return "❌ Bot không thể kết nối Gemini.";
   }
 }
 
@@ -270,6 +262,7 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.login(TOKEN);
+
 
 
 
