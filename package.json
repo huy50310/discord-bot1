@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "deepseek": "latest",
-    "openai": "^4.28.0",
     "@discordjs/voice": "^0.19.0",
     "@dotenvx/dotenvx": "^1.51.1",
     "@ziplayer/extension": "^0.1.1",
