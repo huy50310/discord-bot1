@@ -17,23 +17,41 @@ const userChatHistory = new Map();
 
 async function runGemini(userId, prompt) {
   try {
+    // Nếu chưa có history thì tạo mớ ban đầu
     if (!userChatHistory.has(userId)) {
       userChatHistory.set(userId, [
         { role: "user", parts: [{ text: "Hãy trả lời thân thiện, giống người thật." }] }
       ]);
     }
 
-    const history = userChatHistory.get(userId);
-    const model = genAI.getGenerativeModel({ model: modelName });
-    const chat = model.startChat({ history });
+    let history = userChatHistory.get(userId);
 
-    const result = await chat.sendMessage(prompt);
+    // 🔥 Giới hạn lịch sử: chỉ giữ lại 20 tin nhắn gần nhất
+    if (history.length > 20) {
+      history = history.slice(history.length - 20);
+      userChatHistory.set(userId, history);
+    }
+
+    const model = genAI.getGenerativeModel({ model: modelName });
+
+    // 🔥 API mới của Gemini yêu cầu gửi history trong sendMessage()
+    const contents = [
+      ...history,
+      { role: "user", parts: [{ text: prompt }] }
+    ];
+
+    const result = await model.generateContent({
+      contents
+    });
+
     const response = result.response.text();
 
+    // Lưu lại lịch sử cho lần sau
     history.push({ role: "user", parts: [{ text: prompt }] });
     history.push({ role: "model", parts: [{ text: response }] });
 
     return response;
+
   } catch (err) {
     console.error("Gemini error:", err);
     return "❌ Bot không thể kết nối Gemini.";
@@ -236,5 +254,6 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.login(TOKEN);
+
 
 
