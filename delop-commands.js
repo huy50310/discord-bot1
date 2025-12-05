@@ -1,62 +1,49 @@
-// delop-commands.js
-require('dotenv').config();
-const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-
-const TOKEN = process.env.TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
-
-if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
-  console.error('❌ Missing environment variables. Ensure .env has TOKEN, CLIENT_ID, and GUILD_ID');
-  process.exit(1);
-}
+require("dotenv").config();
+const { REST, Routes, SlashCommandBuilder } = require("discord.js");
 
 const commands = [
-  // /ping
-  new SlashCommandBuilder()
-    .setName('ping')
-    .setDescription('Replies with Pong!')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-  // /say
   new SlashCommandBuilder()
-    .setName('say')
-    .setDescription('Make the bot say something')
-    .addStringOption(option =>
-      option.setName('text')
-        .setDescription('Text to repeat')
+    .setName("ping")
+    .setDescription("Kiểm tra bot hoạt động"),
+
+  new SlashCommandBuilder()
+    .setName("say")
+    .setDescription("Bot nói thay bạn")
+    .addStringOption(option => 
+      option.setName("text")
+        .setDescription("Nội dung muốn bot nói")
         .setRequired(true)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    ),
 
-  // /announce
   new SlashCommandBuilder()
-    .setName('announce')
-    .setDescription('Send an announcement as the bot.')
+    .setName("announce")
+    .setDescription("Gửi thông báo vào channel")
     .addStringOption(option =>
-      option.setName('text')
-        .setDescription('Announcement content')
+      option.setName("text")
+        .setDescription("Nội dung thông báo")
         .setRequired(true)
     )
     .addChannelOption(option =>
-      option.setName('channel')
-        .setDescription('Channel to send the announcement to')
+      option.setName("channel")
+        .setDescription("Kênh cần gửi thông báo")
         .setRequired(true)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
 ].map(cmd => cmd.toJSON());
 
-const rest = new REST({ version: '10' }).setToken(TOKEN);
+const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
 (async () => {
   try {
-    console.log('🔄 Deploying slash commands...');
+    console.log("🔄 Đang cập nhật slash commands...");
+
     await rest.put(
-      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      Routes.applicationCommands(process.env.CLIENT_ID),
       { body: commands }
     );
-    console.log('✅ Successfully deployed slash commands!');
+
+    console.log("✅ Slash Commands đã đăng ký thành công!");
   } catch (err) {
     console.error(err);
   }
