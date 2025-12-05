@@ -12,13 +12,23 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 // =======================
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-const PRIMARY_MODEL = "gemini-2.5-flash-lite";   // ưu tiên
+const PRIMARY_MODEL = "gemini-2.5-flash-lite";   // nhanh nhất
 const SECOND_MODEL  = "gemini-2.5-flash";        // dự phòng
-const FALLBACK_MODEL = "gemini-pro-latest";      // fallback cuối
+const FALLBACK_MODEL = "gemini-pro-latest";      // cuối cùng
 
+// 🎯 Lưu lịch sử theo user
 const userChatHistory = new Map();
 
-// Helper gọi 1 model
+// ♻ Auto reset mỗi 2 giờ
+setInterval(() => {
+  console.log("♻ Auto reset history (2h)");
+  userChatHistory.clear();
+}, 2 * 60 * 60 * 1000);
+
+
+// =======================
+//  Helper gọi 1 model
+// =======================
 async function tryModel(modelName, history, prompt) {
   const model = genAI.getGenerativeModel({ model: modelName });
 
@@ -26,15 +36,21 @@ async function tryModel(modelName, history, prompt) {
     contents: [
       ...history,
       { role: "user", parts: [{ text: prompt }] }
-    ]
+    ],
+    generationConfig: {
+      maxOutputTokens: 80,      // cực nhanh
+      temperature: 0.4
+    }
   });
 }
+
 
 // =======================
 //  AI HANDLER (TỐI ƯU TỐC ĐỘ + GIỮ CẢM XÚC)
 // =======================
 async function runGemini(userId, prompt) {
   try {
+    // lần đầu tạo history
     if (!userChatHistory.has(userId)) {
       userChatHistory.set(userId, [
         { 
@@ -48,7 +64,7 @@ async function runGemini(userId, prompt) {
 
     const history = userChatHistory.get(userId);
 
-    // 🔥 gửi 8 tin gần nhất → tốc độ nhanh
+    // 🔥 gửi 8 tin gần nhất → tốc độ nhanh nhất
     const slimHistory = history.slice(-8);
 
     let result;
@@ -87,7 +103,7 @@ async function runGemini(userId, prompt) {
 
     const response = result.response.text();
 
-    // lưu lịch sử
+    // lưu lại lịch sử
     history.push({ role: "user", parts: [{ text: prompt }] });
     history.push({ role: "model", parts: [{ text: response }] });
 
@@ -113,13 +129,13 @@ const client = new Client({
   ],
 });
 
+
 // =======================
 //  BOT READY + RANDOM STATUS
 // =======================
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
 
-  // Danh sách status dễ thương
   const statuses = [
     { name: "bên cạnh bạn 💛", type: 4 },
     { name: "âm nhạc nhẹ nhàng 🎶", type: 2 },
@@ -141,9 +157,10 @@ client.once(Events.ClientReady, (c) => {
     console.log(`🎀 Status changed → ${random.name}`);
   }
 
-  updateStatus(); // chạy ngay khi bot bật
-  setInterval(updateStatus, 5 * 60 * 1000); // đổi mỗi 5 phút
+  updateStatus();
+  setInterval(updateStatus, 5 * 60 * 1000);
 });
+
 
 // =======================
 //  SLASH COMMANDS
@@ -177,6 +194,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return interaction.reply({ content: `Đã gửi thông báo vào ${channel}.`, flags: 64 });
   }
 });
+
 
 // =======================
 //  MESSAGE HANDLER
@@ -234,7 +252,6 @@ client.on(Events.MessageCreate, async (message) => {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       
       await message.reply("🔌 Bot đang tắt...");
-      console.log("Bot tắt theo yêu cầu admin.");
       return process.exit(0);
     }
 
@@ -311,6 +328,7 @@ client.on(Events.MessageCreate, async (message) => {
     return message.reply("🤖 Bạn muốn hỏi gì?");
   }
 });
+
 
 // LOGIN
 client.login(TOKEN);
