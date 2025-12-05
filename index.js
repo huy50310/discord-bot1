@@ -66,27 +66,27 @@ client.on(Events.InteractionCreate, async (interaction) => {
   const isAdmin = interaction.memberPermissions?.has('Administrator');
 
   if (interaction.commandName === 'ping')
-    return interaction.reply({ content: '🏓 Pong!', ephemeral: true });
+    return interaction.reply({ content: '🏓 Pong!', flags: 64 });
 
   if (interaction.commandName === 'say') {
     if (!isAdmin)
-      return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không phải admin.', flags: 64 });
 
     const text = interaction.options.getString('text');
     await interaction.channel.send(text);
 
-    return interaction.reply({ content: '✅ Bot đã nói thay bạn.', ephemeral: true });
+    return interaction.reply({ content: '✅ Bot đã nói thay bạn.', flags: 64 });
   }
 
   if (interaction.commandName === 'announce') {
     if (!isAdmin)
-      return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
+      return interaction.reply({ content: '❌ Bạn không phải admin.', flags: 64 });
 
     const text = interaction.options.getString('text');
     const channel = interaction.options.getChannel('channel');
 
     await channel.send(`📢 ${text}`);
-    return interaction.reply({ content: `Đã gửi thông báo vào ${channel}.`, ephemeral: true });
+    return interaction.reply({ content: `Đã gửi thông báo vào ${channel}.`, flags: 64 });
   }
 });
 
@@ -234,3 +234,4 @@ client.on(Events.MessageCreate, async (message) => {
 
 // LOGIN
 client.login(TOKEN);
+
