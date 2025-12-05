@@ -1,250 +1,230 @@
-// index.js
 require('dotenv').config();
-const {
-  Client,
-  GatewayIntentBits,
-  Events
+const { 
+  Client, 
+  GatewayIntentBits, 
+  Events 
 } = require('discord.js');
 
-// =========================
-//  DISCORD TOKEN
-// =========================
-const TOKEN = process.env.TOKEN;
+// ======================
+//  DeepSeek Chat Function
+// ======================
+async function askDeepSeek(prompt, history = []) {
+  try {
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        messages: [
+          ...history,
+          { role: "user", content: prompt }
+        ]
+      })
+    });
 
-// =========================
-//  TẠO CLIENT DISCORD
-// =========================
+    const data = await response.json();
+    return data?.choices?.[0]?.message?.content || "Không có phản hồi.";
+  } catch (err) {
+    console.error("DeepSeek API error:", err);
+    return "❌ Lỗi kết nối DeepSeek API.";
+  }
+}
+
+// Lưu lịch sử chat theo user
+const userMemory = {};
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent // ĐÃ BẬT INTENT — nhớ bật trong Developer Portal
+    GatewayIntentBits.MessageContent
   ],
 });
 
-// Khi bot online
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
 });
 
-// =========================
+// ========================
 //  SLASH COMMAND HANDLER
-// =========================
+// ========================
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const isAdmin = interaction.memberPermissions?.has('Administrator');
 
-  // /ping
   if (interaction.commandName === 'ping') {
-    return interaction.reply({
-      content: '🏓 Pong!',
-      ephemeral: true
-    });
+    return interaction.reply({ content: '🏓 Pong!', ephemeral: true });
   }
 
-  // /say
   if (interaction.commandName === 'say') {
-    if (!isAdmin)
-      return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
+    if (!isAdmin) return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
 
     const text = interaction.options.getString('text');
     await interaction.channel.send(text);
-
-    return interaction.reply({
-      content: '✅ Bot đã nói thay bạn.',
-      ephemeral: true
-    });
+    return interaction.reply({ content: '✅ Bot đã nói thay bạn.', ephemeral: true });
   }
 
-  // /announce
   if (interaction.commandName === 'announce') {
-    if (!isAdmin)
-      return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
+    if (!isAdmin) return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
 
     const text = interaction.options.getString('text');
     const channel = interaction.options.getChannel('channel');
 
-    await channel.send(`📢 ${text}`);
-
-    return interaction.reply({
-      content: `Đã gửi thông báo vào ${channel}.`,
-      ephemeral: true
-    });
+    await channel.send(text);
+    return interaction.reply({ content: `Đã gửi thông báo vào ${channel}.`, ephemeral: true });
   }
 });
 
-// =========================
-//  PREFIX COMMANDS (:L)
-// =========================
+// ========================
+//  MESSAGE HANDLER
+// ========================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.inGuild()) return;
   if (message.author.bot) return;
 
   const content = message.content;
-  const isAdmin = message.member.permissions.has('Administrator');
 
-  // PREFIX: :L
+  // --------------------
+  // PREFIX COMMANDS :L
+  // --------------------
   if (content.startsWith(':L ') || content.startsWith(':l ')) {
     const args = content.slice(3).trim().split(/ +/);
     const command = args.shift()?.toLowerCase();
+    const isAdmin = message.member.permissions.has('Administrator');
 
     await message.delete().catch(() => {});
 
-    if (command === 'ping')
-      return message.channel.send('🏓 Pong!');
+    if (command === 'ping') return message.channel.send('🏓 Pong!');
+    if (!isAdmin) return message.channel.send('❌ Bạn không có quyền admin.');
 
-    if (!isAdmin)
-      return message.channel.send('❌ Bạn không có quyền admin.');
-
-    if (command === 'say')
-      return message.channel.send(args.join(' '));
-
-    if (command === 'announce')
-      return message.channel.send(`📢 **Thông báo:** ${args.join(' ')}`);
+    if (command === 'say') return message.channel.send(args.join(' '));
+    if (command === 'announce') return message.channel.send(`📢 **Thông báo:** ${args.join(' ')}`);
 
     return;
   }
 
-  // =========================
-  // BAN / UNBAN / MUTE / UNMUTE
-  // =========================
-
-  const isMentionBot = message.mentions.users.has(client.user.id);
-
-  // Nếu message chỉ là mention → hiện menu
-  if (isMentionBot && message.content.trim() === `<@${client.user.id}>`) {
-    return message.reply(
-      [
-        '📜 **Menu lệnh của bot:**\n',
-        '🔹 **Slash Commands (/):**',
-        '• `/ping` – Kiểm tra bot hoạt động.',
-        '• `/say <text>` – Bot nói thay bạn (ADMIN).',
-        '• `/announce <text> <channel>` – Bot gửi thông báo (ADMIN).',
-        '',
-        '🔹 **Prefix Commands (:L):**',
-        '• `:L ping`',
-        '• `:L say <text>`',
-        '• `:L announce <text>`',
-      ].join('\n')
-    );
-  }
-
-  // Nếu bot bị mention → tiếp tục xử lý lệnh hoặc chatbot
-  if (isMentionBot) {
-    const cleanMsg = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
-    const args = cleanMsg.split(/ +/);
-    const command = args.shift()?.toLowerCase();
-
-    if (['ban', 'unban', 'mute', 'unmute', 'say', 'announce'].includes(command))
-      await message.delete().catch(() => {});
-
-    if (command === 'ping')
-      return message.channel.send('🏓 Pong!');
-
-    if (command === 'ban') {
-      if (!isAdmin) return message.channel.send('❌ Bạn không phải admin.');
-      const member = message.mentions.members.first();
-      const reason = args.slice(1).join(' ') || 'Không có lý do.';
-      if (!member) return message.channel.send('⚠ Bạn phải tag người cần ban.');
-      if (!member.bannable) return message.channel.send('❌ Không thể ban người này.');
-      await member.ban({ reason });
-      return message.channel.send(`🔨 **Bot đã ban ${member.user.tag}**\n📝 Lý do: ${reason}`);
-    }
-
-    if (command === 'unban') {
-      if (!isAdmin) return message.channel.send('❌ Bạn không phải admin.');
-      const userId = args[0];
-      if (!userId) return message.channel.send('⚠ Bạn phải nhập user ID.');
-      await message.guild.bans.remove(userId);
-      return message.channel.send(`♻️ **Bot đã unban người dùng ID: ${userId}**`);
-    }
-
-    if (command === 'mute') {
-      if (!isAdmin) return message.channel.send('❌ Bạn không phải admin.');
-      const member = message.mentions.members.first();
-      const timeArg = args[1];
-      const reason = args.slice(2).join(' ') || 'Không có lý do.';
-
-      if (!member) return message.channel.send('⚠ Bạn phải tag người cần mute.');
-      if (!timeArg) return message.channel.send('⚠ Ví dụ: 10s, 5m, 2h, 1d');
-
-      const match = timeArg.match(/^(\d+)(s|m|h|d)$/i);
-      if (!match) return message.channel.send('⚠ Sai định dạng thời gian.');
-
-      const value = parseInt(match[1]);
-      const unit = match[2].toLowerCase();
-
-      const convert = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
-      const duration = value * convert[unit];
-
-      await member.timeout(duration, reason);
-      return message.channel.send(`🤐 **Đã mute ${member.user.tag} trong ${timeArg}**`);
-    }
-
-    if (command === 'unmute') {
-      if (!isAdmin) return message.channel.send('❌ Bạn không phải admin.');
-      const member = message.mentions.members.first();
-      if (!member) return message.channel.send('⚠ Bạn phải tag người cần unmute.');
-      await member.timeout(null);
-      return message.channel.send(`🔊 **Bot đã unmute ${member.user.tag}**`);
-    }
-  }
-});
-
-// =========================
-//  DEEPSEEK CHATBOT + MEMORY
-// =========================
-const { Deepseek } = require("deepseek");
-const deepseek = new Deepseek({ apiKey: process.env.DEEPSEEK_API_KEY });
-
-const memory = {};
-
-client.on(Events.MessageCreate, async (message) => {
-  if (message.author.bot) return;
-
+  // ======================
+  //   MENTION BOT → CHAT AI
+  // ======================
   if (message.mentions.users.has(client.user.id)) {
-
+    const text = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
     const userId = message.author.id;
 
-    // Tách câu hỏi khỏi mention
-    const question = message.content.replace(
-      new RegExp(`<@!?${client.user.id}>`, 'g'),
-      ""
-    ).trim();
+    // Nếu chỉ tag bot → hiện menu hỗ trợ
+    if (!text.length) {
+      return message.reply({
+        content:
+`📜 **Menu lệnh của bot:**
 
-    if (!question.length)
-      return message.reply("Bạn muốn hỏi gì vậy?");
+🔹 **Chat AI (DeepSeek)**
+• Tag bot rồi hỏi:  \`@bot <câu hỏi>\`
 
-    // Tạo lịch sử chat nếu chưa có
-    if (!memory[userId]) memory[userId] = [];
+🔹 **Slash Commands (/)**
+• \`/ping\` — Kiểm tra bot.
+• \`/say <text>\` — Bot nói thay bạn (ADMIN).
+• \`/announce <text> <channel>\` — Bot gửi thông báo (ADMIN).
 
-    // Lưu tin nhắn user
-    memory[userId].push({ role: "user", content: question });
+🔹 **Prefix Commands (:L)**
+• \`:L ping\`
+• \`:L say <text>\` (ADMIN)
+• \`:L announce <text>\` (ADMIN)
+`,
+        allowedMentions: { repliedUser: false }
+      });
+    }
 
-    // Giới hạn còn 10 tin
-    if (memory[userId].length > 10) memory[userId].shift();
+    // Lưu lịch sử chat
+    if (!userMemory[userId]) userMemory[userId] = [];
+    userMemory[userId].push({ role: "user", content: text });
+    if (userMemory[userId].length > 10) userMemory[userId].shift();
+
+    await message.channel.sendTyping();
+
+    const answer = await askDeepSeek(text, userMemory[userId]);
+
+    userMemory[userId].push({ role: "assistant", content: answer });
+    if (userMemory[userId].length > 10) userMemory[userId].shift();
+
+    return message.reply(answer);
+  }
+
+  // ======================
+  //  BAN / UNBAN / MUTE / UNMUTE
+  // ======================
+  const args = content.split(/ +/);
+  const cmd = args.shift()?.toLowerCase();
+  const isAdmin = message.member.permissions.has('Administrator');
+
+  if (!isAdmin) return;
+
+  if (cmd === 'ban') {
+    const member = message.mentions.members.first();
+    const reason = args.slice(1).join(" ") || "Không có lý do.";
+
+    if (!member) return message.reply("⚠ Tag người cần ban");
 
     try {
-      await message.channel.sendTyping();
-
-      const completion = await deepseek.chat.completions.create({
-        model: "deepseek-chat",
-        messages: memory[userId]
-      });
-
-      const botReply = completion.choices[0].message.content;
-
-      memory[userId].push({ role: "assistant", content: botReply });
-
-      return message.reply(botReply);
-
-    } catch (err) {
-      console.error("DeepSeek Error:", err);
-      return message.reply("❌ Bot không kết nối được DeepSeek.");
+      await member.ban({ reason });
+      return message.channel.send(`🔨 Đã ban **${member.user.tag}**`);
+    } catch {
+      return message.channel.send("❌ Không thể ban.");
     }
   }
+
+  if (cmd === 'unban') {
+    const uid = args[0];
+    try {
+      await message.guild.bans.remove(uid);
+      return message.channel.send(`♻️ Đã unban ID: ${uid}`);
+    } catch {
+      return message.channel.send("❌ Không thể unban.");
+    }
+  }
+
+  if (cmd === 'mute') {
+    const member = message.mentions.members.first();
+    const t = args[1];
+    const reason = args.slice(2).join(" ") || "Không có lý do.";
+
+    if (!member) return message.reply("⚠ Tag người cần mute.");
+    if (!t) return message.reply("⚠ Nhập thời gian: 10s, 5m, 1h...");
+
+    const regex = /^(\d+)(s|m|h|d)$/i;
+    const m = t.match(regex);
+    if (!m) return message.reply("⚠ Sai định dạng.");
+
+    const val = parseInt(m[1]);
+    const unit = m[2].toLowerCase();
+    let ms = 0;
+    if (unit === "s") ms = val * 1000;
+    if (unit === "m") ms = val * 60000;
+    if (unit === "h") ms = val * 3600000;
+    if (unit === "d") ms = val * 86400000;
+
+    try {
+      await member.timeout(ms, reason);
+      return message.channel.send(`🤐 Đã mute **${member.user.tag}** trong ${t}`);
+    } catch (e) {
+      return message.channel.send("❌ Không mute được.");
+    }
+  }
+
+  if (cmd === 'unmute') {
+    const member = message.mentions.members.first();
+    if (!member) return message.reply("⚠ Tag người cần unmute.");
+
+    try {
+      await member.timeout(null);
+      return message.channel.send(`🔊 Đã unmute **${member.user.tag}**`);
+    } catch {
+      return message.channel.send("❌ Không unmute được.");
+    }
+  }
+
 });
 
-// Đăng nhập bot
-client.login(TOKEN);
+client.login(process.env.TOKEN);
