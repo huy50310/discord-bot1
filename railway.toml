@@ -2,7 +2,7 @@
 builder = "NIXPACKS"
 
 [env]
-NODE_VERSION = "22"
+NODE_VERSION = "22.12.0"
 
 [nixpacks]
 [nixpacks.pkg]
