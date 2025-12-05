@@ -7,6 +7,9 @@ const {
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
+// ======================
+//  GEMINI
+// ======================
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const modelName = "gemini-pro-latest";
 
@@ -37,6 +40,9 @@ async function runGemini(userId, prompt) {
   }
 }
 
+// ======================
+// DISCORD CLIENT
+// ======================
 const TOKEN = process.env.TOKEN;
 
 const client = new Client({
@@ -51,14 +57,19 @@ client.once(Events.ClientReady, (c) => {
   console.log(`✅ Logged in as ${c.user.tag}`);
 });
 
+// ======================
+// SLASH COMMAND HANDLER
+// ======================
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const isAdmin = interaction.memberPermissions?.has('Administrator');
 
+  // /ping
   if (interaction.commandName === 'ping')
     return interaction.reply({ content: '🏓 Pong!', ephemeral: true });
 
+  // /say
   if (interaction.commandName === 'say') {
     if (!isAdmin)
       return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
@@ -69,6 +80,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return interaction.reply({ content: '✅ Bot đã nói thay bạn.', ephemeral: true });
   }
 
+  // /announce
   if (interaction.commandName === 'announce') {
     if (!isAdmin)
       return interaction.reply({ content: '❌ Bạn không phải admin.', ephemeral: true });
@@ -79,8 +91,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await channel.send(`📢 ${text}`);
     return interaction.reply({ content: `Đã gửi thông báo vào ${channel}.`, ephemeral: true });
   }
+
+  // ======================
+  // ⭐ NEW: /ask (Gemini)
+  // ======================
+  if (interaction.commandName === "ask") {
+    const question = interaction.options.getString("text");
+
+    // tránh lỗi timeout 3s
+    await interaction.deferReply();
+
+    const answer = await runGemini(interaction.user.id, question);
+
+    return interaction.editReply(answer);
+  }
 });
 
+// ======================
+// PREFIX + MENTION HANDLER
+// ======================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.inGuild()) return;
   if (message.author.bot) return;
@@ -126,6 +155,7 @@ client.on(Events.MessageCreate, async (message) => {
     const command = args.shift()?.toLowerCase();
     const isAdmin = message.member.permissions.has('Administrator');
 
+    // shutdown bot
     if (command === "shutdown") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       
@@ -134,6 +164,7 @@ client.on(Events.MessageCreate, async (message) => {
       return process.exit(0);
     }
 
+    // ban
     if (command === "ban") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       const member = message.mentions.members.first();
@@ -146,6 +177,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`🔨 Đã ban **${member.user.tag}**\n📝 ${reason}`);
     }
 
+    // unban
     if (command === "unban") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       const userId = args[0];
@@ -155,6 +187,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`♻️ Đã unban ID: **${userId}**`);
     }
 
+    // mute
     if (command === "mute") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
 
@@ -167,7 +200,7 @@ client.on(Events.MessageCreate, async (message) => {
       if (!member.moderatable) return message.reply("❌ Không thể mute người này.");
 
       const match = timeArg.match(/^(\d+)(s|m|h|d)$/i);
-      if (!match) return message.reply("⚠ Sai định dạng: 10s, 5m, 2h");
+      if (!match) return message.reply("⚠ Sai định dạng: 10s, 5m, 2h, 1d");
 
       const value = parseInt(match[1]);
       const unit = match[2].toLowerCase();
@@ -175,12 +208,13 @@ client.on(Events.MessageCreate, async (message) => {
       const duration = unit === "s" ? value * 1000 :
                        unit === "m" ? value * 60000 :
                        unit === "h" ? value * 3600000 :
-                       value * 86400000;
+                        unit === "d" ? value * 86400000;
 
       await member.timeout(duration, reason);
       return message.reply(`🤐 Đã mute **${member.user.tag}** trong **${timeArg}**`);
     }
 
+    // unmute
     if (command === "unmute") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       
@@ -191,6 +225,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`🔊 Đã unmute **${member.user.tag}**`);
     }
 
+    // Gemini chat (mention)
     if (after) {
       const reply = await runGemini(message.author.id, after);
       return message.reply(reply);
