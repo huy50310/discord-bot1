@@ -10,7 +10,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Gemini client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const MODEL_NAME = "gemini-1.5-flash";
+const MODEL_NAME = "gemini-1.5-flash"; // model duy nhất tài khoản bạn hỗ trợ
 
 // Nhớ chat theo user
 const memory = {};
@@ -50,30 +50,27 @@ client.on(Events.MessageCreate, async (message) => {
     const command = args.shift()?.toLowerCase();
 
     // Ai cũng dùng được
-    if (command === "ping") {
+    if (command === "ping")
       return message.channel.send("🏓 Pong!");
-    }
 
     // ASK — CHAT AI
     if (command === "ask") {
       const question = args.join(" ");
-      if (!question) return message.reply("❌ Bạn cần nhập câu hỏi. Ví dụ: `:L ask hôm nay trời sao?`");
+      if (!question)
+        return message.reply("❌ Bạn cần nhập câu hỏi. Ví dụ: `:L ask hôm nay trời sao?`");
 
       return runGemini(message, question);
     }
 
     // Các lệnh admin
-    if (!isAdmin) {
+    if (!isAdmin)
       return message.reply("❌ Bạn không có quyền admin.");
-    }
 
-    if (command === "say") {
+    if (command === "say")
       return message.channel.send(args.join(" "));
-    }
 
-    if (command === "announce") {
+    if (command === "announce")
       return message.channel.send(`📢 **Thông báo:** ${args.join(" ")}`);
-    }
 
     return;
   }
@@ -91,7 +88,9 @@ client.on(Events.MessageCreate, async (message) => {
 
   if (!isMentioned) return;
 
-  const content = message.content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
+  const content = message.content
+    .replace(new RegExp(`<@!?${client.user.id}>`, "g"), "")
+    .trim();
 
   // Nếu chỉ mention → show menu
   if (!content) {
@@ -103,21 +102,19 @@ client.on(Events.MessageCreate, async (message) => {
     );
   }
 
-  // Admin commands qua mention
   const parts = content.split(/ +/);
   const command = parts.shift()?.toLowerCase();
 
+  // Admin commands qua mention
   if (["say", "announce", "ban", "unban", "mute", "unmute"].includes(command)) {
     if (!isAdmin) return message.reply("❌ Bạn không có quyền.");
   }
 
-  if (command === "say") {
+  if (command === "say")
     return message.channel.send(parts.join(" "));
-  }
 
-  if (command === "announce") {
+  if (command === "announce")
     return message.channel.send(`📢 **Thông báo:** ${parts.join(" ")}`);
-  }
 
   if (command === "ban") {
     const member = message.mentions.members.first();
@@ -141,13 +138,12 @@ client.on(Events.MessageCreate, async (message) => {
     if (!member) return message.reply("❌ Tag người cần mute.");
     if (!timeArg) return message.reply("❌ Nhập thời gian: 10s / 5m / 1h.");
 
-    const regex = /^(\d+)(s|m|h|d)$/i;
-    const match = timeArg.match(regex);
-    if (!match) return message.reply("❌ Sai định dạng thời gian.");
+    const matched = timeArg.match(/^(\d+)(s|m|h|d)$/i);
+    if (!matched) return message.reply("❌ Sai định dạng thời gian.");
 
-    const num = parseInt(match[1]);
-    const unit = match[2].toLowerCase();
-    const ms = { s: 1000, m: 60000, h: 3600000, d: 86400000 }[unit] * num;
+    const num = parseInt(matched[1]);
+    const unit = matched[2].toLowerCase();
+    const ms = { s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[unit] * num;
 
     await member.timeout(ms);
     return message.reply(`🤐 Đã mute **${member.user.tag}** trong ${timeArg}`);
@@ -190,17 +186,16 @@ async function runGemini(message, question) {
       }))
     });
 
-    const reply = result.response.text();
+    const replyText = result.response.text();
 
-    memory[userId].push({ role: "model", text: reply });
-
+    memory[userId].push({ role: "model", text: replyText });
     if (memory[userId].length > 10) memory[userId].shift();
 
-    return message.reply(reply);
+    return message.reply(replyText);
 
   } catch (err) {
     console.error("Gemini error:", err);
-    return message.reply("❌ Bot không thể kết nối tới Gemini 1.5 Pro.");
+    return message.reply("❌ Bot không thể kết nối Gemini (model đang dùng: gemini-1.5-flash).");
   }
 }
 
@@ -209,5 +204,3 @@ async function runGemini(message, question) {
 // LOGIN BOT
 // ===============================
 client.login(process.env.TOKEN);
-
-
