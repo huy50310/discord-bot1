@@ -3,3 +3,13 @@ builder = "NIXPACKS"
 
 [env]
 NODE_VERSION = "20"
+
+[nixpacks]
+# Cài các package cần cho Discord Voice
+[nixpacks.pkg]
+# libsodium = encryption
+# ffmpeg = play audio
+addPkgs = ["libsodium", "ffmpeg"]
+
+[phases.install]
+cmds = ["npm install"]
