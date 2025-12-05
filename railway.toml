@@ -3,14 +3,14 @@ builder = "NIXPACKS"
 
 [nixpacks]
 packages = [
-  "libsodium",      # encryption
-  "libopus",        # opus encoder cho voice
-  "opusTools",      # hỗ trợ thêm cho play-dl
-  "ffmpeg"          # stream audio
+  "libsodium",
+  "libopus",
+  "opusTools",
+  "ffmpeg"
 ]
-
-[env]
-NODE_VERSION = "20"
 
 [phases.install]
 cmds = ["npm install"]
+
+[env]
+NODE_VERSION = "20"
