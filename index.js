@@ -36,7 +36,7 @@ async function runGemini(userId, prompt) {
     return response;
   } catch (err) {
     console.error("Gemini error:", err);
-    return "❌ Bot không thể kết nối Gemini.";
+    return "❌ Bot không thể kết nối.";
   }
 }
 
@@ -234,4 +234,5 @@ client.on(Events.MessageCreate, async (message) => {
 
 // LOGIN
 client.login(TOKEN);
+
 
