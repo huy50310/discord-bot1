@@ -1,7 +1,7 @@
 {
-  "name": "yagami-linh-bot",
+  "name": "Yang-Hui-Bot",
   "version": "0.0.1",
-  "description": "yagami linh bot",
+  "description": "Yang Hui Bot",
   "main": "index.js",
 
   "scripts": {
