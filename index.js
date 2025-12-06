@@ -1,3 +1,11 @@
+// ========================== LOAD LIBSODIUM FIRST ==========================
+const sodium = require("libsodium-wrappers");
+
+(async () => {
+  await sodium.ready;
+  console.log("🔐 Libsodium loaded successfully!");
+})();
+
 require("dotenv").config();
 const {
   Client, GatewayIntentBits, Partials, Events
@@ -236,3 +244,4 @@ client.on(Events.MessageCreate, async (msg) => {
 
 // ======================= LOGIN =======================
 client.login(process.env.TOKEN);
+
