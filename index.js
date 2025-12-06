@@ -18,33 +18,21 @@ const {
   getVoiceConnection
 } = require("@discordjs/voice");
 
-const play = require("play-dl");
-const fs = require("fs");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const ytdlp = require("yt-dlp-exec");
+const { Readable } = require("stream");
 
-// ============================
-// LOAD YOUTUBE COOKIE (optional)
-// ============================
-(async () => {
-  try {
-    const cookie = JSON.parse(fs.readFileSync("./youtube-cookies.json"));
-    await play.setToken({ youtube: { cookie: cookie.cookie } });
-    console.log("🍪 YouTube cookie loaded!");
-  } catch {
-    console.log("⚠ Không thấy youtube-cookies.json, bỏ qua cookie.");
-  }
-})();
-
-// ============================
+// ====================================================================
 // CONFIG
-// ============================
+// ====================================================================
 const TOKEN = process.env.TOKEN;
 const PREFIX = process.env.PREFIX || "!";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// ============================
-// CLIENT
-// ============================
+const PRIMARY = "gemini-2.5-flash-lite";
+const SECOND = "gemini-2.5-flash";
+const FALLBACK = "gemini-pro-latest";
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -55,16 +43,13 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// ============================
+
+// ====================================================================
 // GEMINI AI
-// ============================
-const PRIMARY = "gemini-2.5-flash-lite";
-const SECOND = "gemini-2.5-flash";
-const FALLBACK = "gemini-pro-latest";
+// ====================================================================
+const chatHistory = new Map();
 
-const historyMap = new Map();
-
-async function callModel(model, history, prompt) {
+async function callGeminiModel(model, history, prompt) {
   const m = genAI.getGenerativeModel({ model });
   return m.generateContent({
     contents: [...history, { role: "user", parts: [{ text: prompt }] }]
@@ -73,57 +58,58 @@ async function callModel(model, history, prompt) {
 
 async function runGemini(uid, prompt) {
   try {
-    if (!historyMap.has(uid)) {
-      historyMap.set(uid, [
-        { role: "user", parts: [{ text: "Hãy trả lời thân thiện, giống người thật." }] }
+    if (!chatHistory.has(uid)) {
+      chatHistory.set(uid, [
+        { role: "user", parts: [{ text: "Hãy trả lời thân thiện như người thật." }] }
       ]);
     }
 
-    const h = historyMap.get(uid).slice(-8);
-    let ans;
+    const hist = chatHistory.get(uid).slice(-8);
+    let result;
 
-    try { ans = await callModel(PRIMARY, h, prompt); } catch {}
-    if (!ans) try { ans = await callModel(SECOND, h, prompt); } catch {}
-    if (!ans) try { ans = await callModel(FALLBACK, h, prompt); } catch {
-      return "❌ AI đang bận, thử lại sau.";
-    }
+    try { result = await callGeminiModel(PRIMARY, hist, prompt); } catch {}
+    if (!result) try { result = await callGeminiModel(SECOND, hist, prompt); } catch {}
+    if (!result) try { result = await callGeminiModel(FALLBACK, hist, prompt); }
+      catch { return "❌ AI đang bận, thử lại sau."; }
 
-    const text = ans.response.text();
-    historyMap.get(uid).push(
+    const text = result.response.text();
+    chatHistory.get(uid).push(
       { role: "user", parts: [{ text: prompt }] },
       { role: "model", parts: [{ text }] }
     );
 
     return text;
+
   } catch (e) {
     console.log("AI error:", e);
     return "❌ Lỗi AI.";
   }
 }
 
-// ============================
-// MUSIC QUEUE
-// ============================
+
+// ====================================================================
+// QUEUE + MUSIC SYSTEM (YT-DLP)
+// ====================================================================
 const queues = new Map();
 
 function getQueue(gid) {
   if (!queues.has(gid)) {
     queues.set(gid, {
+      list: [],
+      playing: false,
       text: null,
       voice: null,
       conn: null,
-      list: [],
-      playing: false,
-      timeout: null,
       player: createAudioPlayer({
         behaviors: { noSubscriber: NoSubscriberBehavior.Stop }
-      })
+      }),
+      timeout: null
     });
   }
   return queues.get(gid);
 }
 
-// chuyển mọi dạng link → watch URL chuẩn
+// CHUYỂN MỌI LINK → WATCH URL
 function normalizeURL(url) {
   try {
     if (url.includes("watch?v="))
@@ -142,12 +128,23 @@ function normalizeURL(url) {
     if (v) return "https://www.youtube.com/watch?v=" + v;
 
     return null;
+
   } catch {
     return null;
   }
 }
 
-// phát bài tiếp theo
+// LẤY STREAM BẰNG YT-DLP (KHÔNG BAO GIỜ LỖI)
+async function getAudioStream(url) {
+  const proc = ytdlp(url, {
+    output: "-",
+    format: "bestaudio",
+    quiet: true
+  });
+  return Readable.from(proc.stdout);
+}
+
+// PHÁT NHẠC
 async function playNext(gid) {
   const q = getQueue(gid);
 
@@ -168,26 +165,23 @@ async function playNext(gid) {
   const song = q.list[0];
 
   try {
-    console.log("▶ STREAM:", song.url);
+    q.text?.send(`🎶 Đang phát: **${song.title}** (${song.duration})`);
 
-    const stream = await play.stream(song.url, { discordPlayerCompatibility: true });
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type
-    });
+    const stream = await getAudioStream(song.url);
+    const resource = createAudioResource(stream);
 
     q.player.play(resource);
     q.playing = true;
 
-    q.text?.send(`🎶 Đang phát: **${song.title}** (${song.duration})`);
   } catch (e) {
     console.log("STREAM FAIL:", e);
-    q.text?.send("⚠️ Không phát được bài này, skip...");
+    q.text?.send("⚠️ Lỗi phát nhạc → Skip");
     q.list.shift();
-    playNext(gid);
+    return playNext(gid);
   }
 }
 
-// thêm bài vào queue (đã fix URL / ID)
+// THÊM BÀI
 async function addSong(msg, query) {
   const gid = msg.guild.id;
   const q = getQueue(gid);
@@ -207,7 +201,6 @@ async function addSong(msg, query) {
 
     q.conn.subscribe(q.player);
 
-    q.player.removeAllListeners("stateChange");
     q.player.on(AudioPlayerStatus.Idle, () => {
       if (q.playing) {
         q.list.shift();
@@ -216,58 +209,57 @@ async function addSong(msg, query) {
     });
   }
 
-  let videoId;
+  let fixedURL = query.startsWith("http")
+    ? normalizeURL(query)
+    : null;
 
-  try {
-    if (query.startsWith("http")) {
-      const fixed = normalizeURL(query);
-      if (!fixed) return msg.reply("❌ Link YouTube không hợp lệ.");
-      videoId = fixed.split("v=")[1];
-    } else {
-      const r = await play.search(query, { limit: 1 });
-      if (!r.length) return msg.reply("❌ Không tìm thấy bài hát.");
-      videoId = r[0].id;
-    }
+  if (!fixedURL) {
+    // search
+    const ytdlpSearch = await ytdlp(query, {
+      dumpSingleJson: true,
+      defaultSearch: "ytsearch",
+      quiet: true
+    });
 
-    if (!videoId) return msg.reply("❌ Không lấy được ID video.");
+    if (!ytdlpSearch || !ytdlpSearch.entries || !ytdlpSearch.entries.length)
+      return msg.reply("❌ Không tìm thấy bài hát nào.");
 
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
-    const info = await play.video_basic_info(url);
-
-    const song = {
-      title: info.video_details.title,
-      url,
-      duration: info.video_details.durationRaw || "?"
-    };
-
-    q.list.push(song);
-    msg.reply(`➕ Đã thêm: **${song.title}**`);
-
-    if (!q.playing) playNext(gid);
-  } catch (e) {
-    console.log("addSong error:", e);
-    msg.reply("❌ Lỗi khi thêm bài.");
+    fixedURL = `https://www.youtube.com/watch?v=${ytdlpSearch.entries[0].id}`;
   }
+
+  // lấy thông tin bài
+  const info = await ytdlp(fixedURL, { dumpSingleJson: true, quiet: true });
+
+  const song = {
+    title: info.title,
+    url: fixedURL,
+    duration: info.duration_string || "?"
+  };
+
+  q.list.push(song);
+  msg.reply(`➕ Đã thêm: **${song.title}**`);
+
+  if (!q.playing) playNext(gid);
 }
 
-// ============================
-// AUTO STATUS
-// ============================
-client.once(Events.ClientReady, (c) => {
-  console.log(`✅ Bot Online: ${c.user.tag}`);
+
+// ====================================================================
+// STATUS
+// ====================================================================
+client.once(Events.ClientReady, () => {
+  console.log(`💚 Bot Online: ${client.user.tag}`);
 
   const statuses = [
-    "🎶 !play để nghe nhạc",
-    "🤖 Tag tôi để hỏi AI",
-    "🎧 Chill với nhạc",
-    "🛡 Admin tools ready"
+    "🎶 Nhạc không lỗi",
+    "🤖 Chat AI",
+    "🛡 Admin tools",
   ];
 
   const updateStatus = () => {
-    const s = statuses[Math.floor(Math.random() * statuses.length)];
+    const text = statuses[Math.floor(Math.random() * statuses.length)];
     client.user.setPresence({
       status: "online",
-      activities: [{ name: s, type: ActivityType.Playing }]
+      activities: [{ name: text, type: ActivityType.Playing }]
     });
   };
 
@@ -275,14 +267,16 @@ client.once(Events.ClientReady, (c) => {
   setInterval(updateStatus, 5 * 60 * 1000);
 });
 
-// ============================
-// ADMIN HELPERS
-// ============================
+
+// ====================================================================
+// ADMIN UTILS
+// ====================================================================
 function parseDuration(str) {
   const m = str.match(/^(\d+)(s|m|h|d)$/i);
   if (!m) return null;
-  const v = parseInt(m[1]);
-  const u = m[2].toLowerCase();
+  const v = Number(m[1]);
+  const u = m[2];
+
   return u === "s" ? v * 1000 :
          u === "m" ? v * 60000 :
          u === "h" ? v * 3600000 :
@@ -290,187 +284,145 @@ function parseDuration(str) {
 }
 
 async function adminBan(msg, args) {
-  const member = msg.mentions.members.first();
-  const reason = args.slice(1).join(" ") || "Không có lý do.";
-  if (!member) return msg.reply("⚠ Tag người cần ban.");
-  if (!member.bannable) return msg.reply("❌ Không thể ban.");
-  await member.ban({ reason });
-  return msg.reply(`🔨 Đã ban **${member.user.tag}**\n📝 ${reason}`);
+  const m = msg.mentions.members.first();
+  if (!m) return msg.reply("⚠ Tag người cần ban.");
+  if (!m.bannable) return msg.reply("❌ Không thể ban.");
+
+  const reason = args.slice(1).join(" ") || "Không có lý do";
+  await m.ban({ reason });
+  return msg.reply(`🔨 Ban: **${m.user.tag}**`);
 }
 
 async function adminUnban(msg, args) {
   const id = args[0];
-  if (!id) return msg.reply("⚠ Nhập user ID.");
+  if (!id) return msg.reply("⚠ Nhập userId");
   await msg.guild.bans.remove(id).catch(() => {});
-  return msg.reply(`♻️ Đã unban ID **${id}**`);
+  return msg.reply(`♻ Unban: **${id}**`);
 }
 
 async function adminMute(msg, args) {
-  const member = msg.mentions.members.first();
-  const timeArg = args[1];
-  const reason = args.slice(2).join(" ") || "Không có lý do.";
-  if (!member) return msg.reply("⚠ Tag người cần mute.");
-  if (!timeArg) return msg.reply("⚠ Nhập thời gian: 10s | 5m | 2h | 1d");
-  if (!member.moderatable) return msg.reply("❌ Không thể mute.");
-  const d = parseDuration(timeArg);
-  if (!d) return msg.reply("⚠ Sai định dạng thời gian.");
-  await member.timeout(d, reason);
-  return msg.reply(`🤐 Đã mute **${member.user.tag}** trong **${timeArg}**`);
+  const m = msg.mentions.members.first();
+  if (!m) return msg.reply("⚠ Tag người cần mute");
+  if (!m.moderatable) return msg.reply("❌ Không thể mute");
+
+  const dur = parseDuration(args[1]);
+  if (!dur) return msg.reply("⚠ Sai thời gian. VD: 10s 5m 2h");
+
+  const reason = args.slice(2).join(" ") || "Không có lý do";
+  await m.timeout(dur, reason);
+  return msg.reply(`🤐 Mute **${m.user.tag}** ${args[1]}`);
 }
 
 async function adminUnmute(msg) {
-  const member = msg.mentions.members.first();
-  if (!member) return msg.reply("⚠ Tag người cần unmute.");
-  await member.timeout(null);
-  return msg.reply(`🔊 Đã unmute **${member.user.tag}**`);
+  const m = msg.mentions.members.first();
+  if (!m) return msg.reply("⚠ Tag người cần unmute");
+  await m.timeout(null);
+  return msg.reply(`🔊 Unmute **${m.user.tag}**`);
 }
 
-async function adminShutdown(msg) {
-  await msg.reply("🔌 Bot đang tắt...");
-  console.log("Bot shutdown by admin.");
-  process.exit(0);
-}
 
-// :L lệnh ẩn
-async function handleHiddenCommand(msg, content) {
-  const args = content.slice(3).trim().split(/ +/);
-  const cmd = args.shift()?.toLowerCase();
-
-  await msg.delete().catch(() => {});
-
-  if (!msg.member.permissions.has("Administrator"))
-    return msg.channel.send("❌ Bạn không có quyền admin.");
-
-  if (cmd === "ping") return msg.channel.send("🏓 Pong!");
-
-  if (cmd === "say") return msg.channel.send(args.join(" "));
-
-  if (cmd === "announce")
-    return msg.channel.send(`📢 **Thông báo:** ${args.join(" ")}`);
-}
-
-// ============================
+// ====================================================================
 // MESSAGE HANDLER
-// ============================
+// ====================================================================
 client.on(Events.MessageCreate, async (msg) => {
   if (!msg.inGuild() || msg.author.bot) return;
 
-  let content = msg.content || "";
   const gid = msg.guild.id;
-  const q = getQueue(gid);
+  const content = msg.content;
   const isAdmin = msg.member.permissions.has("Administrator");
 
-  // PREFIX
+  // PREFIX COMMANDS
   if (content.startsWith(PREFIX)) {
     const args = content.slice(PREFIX.length).trim().split(/ +/);
     const cmd = args.shift()?.toLowerCase();
 
     try {
-      // MUSIC
       if (cmd === "play") {
-        if (!args.length) return msg.reply("❌ Dùng: !play <link hoặc tên bài>");
+        if (!args.length) return msg.reply("❌ !play <bài hát>");
         await addSong(msg, args.join(" "));
-      } else if (cmd === "skip") {
+      }
+
+      else if (cmd === "skip") {
+        const q = getQueue(gid);
         q.list.shift();
-        msg.reply("⏭ Đã skip!");
+        msg.reply("⏭ Skip!");
         playNext(gid);
-      } else if (cmd === "pause") {
-        q.player.pause();
-        msg.reply("⏸ Đã tạm dừng.");
-      } else if (cmd === "resume") {
-        q.player.unpause();
-        msg.reply("▶ Đã tiếp tục phát.");
-      } else if (cmd === "queue") {
-        if (!q.list.length) return msg.reply("📭 Queue trống.");
-        msg.reply(
-          q.list.map((s, i) =>
-            `${i === 0 ? "🎧 Đang phát:" : `${i}.`} ${s.title}`
-          ).join("\n")
-        );
-      } else if (cmd === "stop") {
+      }
+
+      else if (cmd === "pause") {
+        getQueue(gid).player.pause();
+        msg.reply("⏸ Pause");
+      }
+
+      else if (cmd === "resume") {
+        getQueue(gid).player.unpause();
+        msg.reply("▶ Resume");
+      }
+
+      else if (cmd === "stop") {
+        const q = getQueue(gid);
         q.list = [];
         q.player.stop();
         const conn = getVoiceConnection(gid);
         if (conn) conn.destroy();
         queues.delete(gid);
-        msg.reply("🛑 Đã dừng nhạc & rời voice.");
+        msg.reply("🛑 Đã dừng & rời voice.");
+      }
+
+      else if (cmd === "queue") {
+        const q = getQueue(gid);
+        if (!q.list.length) return msg.reply("📭 Queue trống.");
+        msg.reply(q.list.map((s, i) =>
+          `${i === 0 ? "🎧 Đang phát:" : i + "."} ${s.title}`
+        ).join("\n"));
       }
 
       // ADMIN
       else if (cmd === "ban") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
+        if (!isAdmin) return msg.reply("❌ Không phải admin");
         return adminBan(msg, args);
-      } else if (cmd === "unban") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-        return adminUnban(msg, args);
-      } else if (cmd === "mute") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-        return adminMute(msg, args);
-      } else if (cmd === "unmute") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-        return adminUnmute(msg);
-      } else if (cmd === "shutdown") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-        return adminShutdown(msg);
       }
+
+      else if (cmd === "unban") {
+        if (!isAdmin) return msg.reply("❌ Không phải admin");
+        return adminUnban(msg, args);
+      }
+
+      else if (cmd === "mute") {
+        if (!isAdmin) return msg.reply("❌ Không phải admin");
+        return adminMute(msg, args);
+      }
+
+      else if (cmd === "unmute") {
+        if (!isAdmin) return msg.reply("❌ Không phải admin");
+        return adminUnmute(msg);
+      }
+
     } catch (e) {
-      console.log("PREFIX error:", e);
-      msg.reply("❌ Lỗi khi xử lý lệnh.");
+      console.log("CMD ERROR:", e);
+      msg.reply("❌ Lỗi xử lý lệnh.");
     }
 
     return;
   }
 
-  // :L lệnh ẩn
-  if (content.startsWith(":L ") || content.startsWith(":l ")) {
-    return handleHiddenCommand(msg, content);
-  }
-
-  // Mention → admin + AI
+  // AI MENTION
   if (msg.mentions.users.has(client.user.id)) {
     let text = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
-    const args = text.split(/ +/);
-    const cmd = args.shift()?.toLowerCase();
+    if (!text) return msg.reply("🤖 Bạn muốn hỏi gì?");
 
-    if (cmd === "shutdown") {
-      if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-      return adminShutdown(msg);
-    }
-    if (cmd === "ban") {
-      if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-      return adminBan(msg, args);
-    }
-    if (cmd === "unban") {
-      if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-      return adminUnban(msg, args);
-    }
-    if (cmd === "mute") {
-      if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-      return adminMute(msg, args);
-    }
-    if (cmd === "unmute") {
-      if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-      return adminUnmute(msg);
-    }
-
-    if (text.length > 0) {
-      const reply = await runGemini(msg.author.id, text);
-      return msg.reply(reply);
-    }
-
-    return msg.reply("🤖 Bạn muốn hỏi gì?");
+    const ans = await runGemini(msg.author.id, text);
+    return msg.reply(ans);
   }
 });
 
-// ============================
-// LOGIN + ERROR HANDLERS
-// ============================
-client.login(TOKEN)
-  .then(() => console.log("🔑 Login thành công, bot đang chạy..."))
-  .catch(err => {
-    console.error("❌ Login lỗi:", err);
-    process.exit(1);
-  });
 
-process.on("unhandledRejection", (r) => console.log("⚠ unhandledRejection:", r));
-process.on("uncaughtException", (e) => console.log("⚠ uncaughtException:", e));
+// ====================================================================
+// LOGIN + ERROR HANDLER
+// ====================================================================
+client.login(TOKEN)
+  .then(() => console.log("🔑 Bot đã login!"))
+  .catch(err => console.log("❌ Login fail:", err));
+
+process.on("unhandledRejection", err => console.log("⚠ unhandledRejection:", err));
+process.on("uncaughtException", err => console.log("⚠ uncaughtException:", err));
