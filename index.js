@@ -1,6 +1,4 @@
 require("dotenv").config();
-const fs = require("fs");
-
 const {
   Client,
   GatewayIntentBits,
@@ -10,37 +8,40 @@ const {
 
 const {
   joinVoiceChannel,
-  getVoiceConnection,
   createAudioPlayer,
   createAudioResource,
   NoSubscriberBehavior,
-  AudioPlayerStatus
+  AudioPlayerStatus,
+  getVoiceConnection
 } = require("@discordjs/voice");
 
 const play = require("play-dl");
+const fs = require("fs");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// =========================================
-// CONFIG
-// =========================================
-const TOKEN = process.env.TOKEN;
-const PREFIX = process.env.PREFIX || "!";
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// Load cookies nếu có
+// ========================
+// LOAD COOKIES YOUTUBE
+// ========================
 (async () => {
   try {
-    const ck = JSON.parse(fs.readFileSync("./youtube-cookies.json"));
-    await play.setToken({ youtube: { cookie: ck.cookie } });
-    console.log("🍪 Cookies YouTube loaded!");
-  } catch {
-    console.log("⚠ No YouTube cookies found.");
+    const cookies = JSON.parse(fs.readFileSync("./youtube-cookies.json"));
+    await play.setToken({
+      youtube: {
+        cookie: cookies.cookie
+      }
+    });
+    console.log("🍪 YouTube cookies loaded!");
+  } catch (e) {
+    console.log("⚠️ Không tìm thấy youtube-cookies.json hoặc cookie lỗi.");
   }
 })();
 
-// =========================================
-// CLIENT
-// =========================================
+// ========================
+// CONFIG
+// ========================
+const PREFIX = process.env.PREFIX || "!";
+const TOKEN = process.env.TOKEN;
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -51,58 +52,70 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// =========================================
-// AI ENGINE – Gemini Compact
-// =========================================
-const MODELS = [
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash",
-  "gemini-pro-latest"
-];
+// ========================
+// GEMINI AI CONFIG
+// ========================
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-const chatHistory = new Map();
+const PRIMARY_MODEL = "gemini-2.5-flash-lite";
+const SECOND_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = "gemini-pro-latest";
 
-async function runAI(uid, prompt) {
-  if (!chatHistory.has(uid)) {
-    chatHistory.set(uid, [
-      {
-        role: "user",
-        parts: [{ text: "Hãy trả lời thân thiện và có cảm xúc." }]
-      }
-    ]);
-  }
+const userChatHistory = new Map();
 
-  const history = chatHistory.get(uid).slice(-8);
-
-  let result = null;
-  for (const m of MODELS) {
-    try {
-      console.log("AI MODEL →", m);
-      const model = genAI.getGenerativeModel({ model: m });
-
-      result = await model.generateContent({
-        contents: [...history, { role: "user", parts: [{ text: prompt }] }]
-      });
-
-      break;
-    } catch (e) {
-      console.log(`⚠ Model ${m} lỗi → thử model tiếp theo`);
-    }
-  }
-
-  if (!result) return "❌ AI đang quá tải.";
-
-  const output = result.response.text();
-  history.push({ role: "user", parts: [{ text: prompt }] });
-  history.push({ role: "model", parts: [{ text: output }] });
-
-  chatHistory.set(uid, history);
-  return output;
+async function tryModel(modelName, history, prompt) {
+  const m = genAI.getGenerativeModel({ model: modelName });
+  return m.generateContent({
+    contents: [...history, { role: "user", parts: [{ text: prompt }] }]
+  });
 }
 
-// =========================================
-// MUSIC ENGINE – TỐI ƯU NHẠC 100%
-// =========================================
+async function runGemini(userId, prompt) {
+  try {
+    if (!userChatHistory.has(userId)) {
+      userChatHistory.set(userId, [
+        {
+          role: "user",
+          parts: [{ text: "Hãy trả lời thân thiện như người thật." }]
+        }
+      ]);
+    }
+
+    const history = userChatHistory.get(userId);
+    const slim = history.slice(-8);
+    let res;
+
+    try {
+      res = await tryModel(PRIMARY_MODEL, slim, prompt);
+    } catch {}
+
+    if (!res) {
+      try {
+        res = await tryModel(SECOND_MODEL, slim, prompt);
+      } catch {}
+    }
+
+    if (!res) {
+      try {
+        res = await tryModel(FALLBACK_MODEL, slim, prompt);
+      } catch {
+        return "❌ AI đang quá tải.";
+      }
+    }
+
+    const result = res.response.text();
+    history.push({ role: "user", parts: [{ text: prompt }] });
+    history.push({ role: "model", parts: [{ text: result }] });
+
+    return result;
+  } catch {
+    return "❌ Lỗi AI.";
+  }
+}
+
+// ========================
+// MUSIC QUEUE
+// ========================
 const queues = new Map();
 
 function getQueue(guildId) {
@@ -111,26 +124,30 @@ function getQueue(guildId) {
       text: null,
       voice: null,
       conn: null,
-      player: createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } }),
       list: [],
       playing: false,
-      timeout: null
+      timeout: null,
+      player: createAudioPlayer({
+        behaviors: { noSubscriber: NoSubscriberBehavior.Stop }
+      })
     });
   }
   return queues.get(guildId);
 }
 
-// Tối ưu playNext → đảm bảo **có tiếng**
+// ========================
+// PLAY NEXT SONG
+// ========================
 async function playNext(guildId) {
   const q = queues.get(guildId);
-  if (!q || !q.list.length) {
+  if (!q || q.list.length === 0) {
     q.playing = false;
 
     if (q.timeout) clearTimeout(q.timeout);
     q.timeout = setTimeout(() => {
       q.conn?.destroy();
       queues.delete(guildId);
-    }, 2 * 60 * 1000);
+    }, 120000);
 
     q.text?.send("📭 Hết nhạc! Bot sẽ rời voice sau 2 phút.");
     return;
@@ -139,10 +156,29 @@ async function playNext(guildId) {
   const song = q.list[0];
 
   try {
-    const stream = await play.stream(song.url, {
-      quality: 2,                     // ưu tiên audio
-      discordPlayerCompatibility: true // đảm bảo tương thích FFmpeg/Opus
-    });
+    if (!song.url) {
+      q.text?.send("❌ URL lỗi. Bỏ bài.");
+      q.list.shift();
+      return playNext(guildId);
+    }
+
+    let stream;
+
+    try {
+      stream = await play.stream(song.url, {
+        discordPlayerCompatibility: true,
+        quality: 2
+      });
+    } catch (e) {
+      console.log("STREAM FAIL 1:", e);
+      return q.text?.send("❌ Không thể stream audio.");
+    }
+
+    if (!stream?.stream) {
+      q.text?.send("❌ Stream lỗi. Bỏ qua bài.");
+      q.list.shift();
+      return playNext(guildId);
+    }
 
     const resource = createAudioResource(stream.stream, {
       inputType: stream.type
@@ -151,28 +187,31 @@ async function playNext(guildId) {
     q.player.play(resource);
     q.playing = true;
 
-    q.text?.send(`▶️ Đang phát: **${song.title}**`);
+    q.text?.send(`🎶 Đang phát: **${song.title}**`);
 
-  } catch (err) {
-    console.log("STREAM ERROR:", err);
+  } catch (e) {
+    console.log("STREAM ERROR:", e);
     q.list.shift();
     playNext(guildId);
   }
 }
 
+// ========================
+// ADD SONG (NO PLAYLIST)
+// ========================
 async function addSong(msg, query) {
   const guildId = msg.guild.id;
   const q = getQueue(guildId);
 
-  if (!msg.member.voice.channel)
-    return msg.reply("❌ Hãy vào voice channel trước!");
+  const vc = msg.member.voice.channel;
+  if (!vc) return msg.reply("❌ Vào voice trước.");
 
   q.text = msg.channel;
-  q.voice = msg.member.voice.channel;
+  q.voice = vc;
 
   if (!q.conn) {
     q.conn = joinVoiceChannel({
-      channelId: q.voice.id,
+      channelId: vc.id,
       guildId,
       adapterCreator: msg.guild.voiceAdapterCreator
     });
@@ -185,141 +224,120 @@ async function addSong(msg, query) {
     });
   }
 
-  let items = [];
+  let song;
 
   try {
     const type = play.yt_validate(query);
 
-    // ❌ Không hỗ trợ playlist
-    if (type === "playlist") {
-      return msg.reply("❌ Bot không hỗ trợ playlist. Hãy gửi video lẻ.");
-    }
+    if (type === "playlist")
+      return msg.reply("❌ Không hỗ trợ playlist.");
 
-    // VIDEO LẺ
     if (type === "video") {
-      const info = await play.video_info(query).catch(() => null);
-      if (!info) return msg.reply("❌ Không thể tải video.");
+      const info = await play.video_info(query);
 
-      items.push({
+      song = {
         title: info.video_details.title,
         url: info.video_details.url,
-        duration: info.video_details.durationRaw
-      });
-
-      msg.reply(`➕ Đã thêm: **${info.video_details.title}**`);
-    }
-
-    // SEARCH
-    else {
+        duration: info.video_details.durationRaw || "?"
+      };
+    } else {
       const r = await play.search(query, { limit: 1 });
-      if (!r?.length) return msg.reply("❌ Không tìm thấy bài hát.");
+      if (!r.length) return msg.reply("❌ Không tìm thấy bài.");
 
-      items.push({
+      song = {
         title: r[0].title,
         url: r[0].url,
-        duration: r[0].durationRaw
-      });
-
-      msg.reply(`🔍 Tìm thấy: **${r[0].title}**`);
+        duration: r[0].durationRaw || "?"
+      };
     }
 
-  } catch (err) {
-    console.log("ADD SONG ERROR:", err);
-    return msg.reply("❌ Lỗi khi xử lý bài hát.");
+  } catch (e) {
+    console.log("ADDSONG ERROR:", e);
+    return msg.reply("❌ Không thể thêm bài này.");
   }
 
-  q.list.push(...items);
+  if (!song?.url) return msg.reply("❌ Video không hợp lệ.");
+
+  q.list.push(song);
+  msg.reply(`➕ Đã thêm: **${song.title}**`);
 
   if (!q.playing) playNext(guildId);
 }
 
-// =========================================
-// READY
-// =========================================
-client.on(Events.ClientReady, () => {
-  console.log("Bot logged in!");
-
-  const statuses = ["nhạc 🎶", "AI 🤖", "chill 😎", "Gemini 💛"];
-
-  function updateStatus() {
-    client.user.setPresence({
-      activities: [{ name: statuses[Math.floor(Math.random() * statuses.length)] }]
-    });
-  }
-
-  updateStatus();
-  setInterval(updateStatus, 300000);
+// ========================
+// BOT READY
+// ========================
+client.once(Events.ClientReady, () => {
+  console.log(`Logged in as ${client.user.tag}`);
 });
 
-// =========================================
-// MESSAGE HANDLER
-// =========================================
-client.on(Events.MessageCreate, async msg => {
+// ========================
+// PREFIX COMMANDS
+// ========================
+client.on(Events.MessageCreate, async (msg) => {
   if (!msg.inGuild() || msg.author.bot) return;
 
-  const isAdmin = msg.member.permissions.has("Administrator");
   const content = msg.content;
-  const args = content.split(/ +/);
+  const isAdmin = msg.member.permissions.has("Administrator");
+  const guildId = msg.guild.id;
+  const q = getQueue(guildId);
 
-  // PREFIX COMMANDS
   if (content.startsWith(PREFIX)) {
-    const cmd = args.shift().slice(PREFIX.length).toLowerCase();
-    const q = getQueue(msg.guild.id);
+    const args = content.slice(PREFIX.length).trim().split(/ +/);
+    const cmd = args.shift()?.toLowerCase();
 
     try {
-      if (cmd === "play") return addSong(msg, args.join(" "));
-      if (cmd === "skip") {
-        q.list.shift();
-        playNext(msg.guild.id);
-        return msg.reply("⏭ Đã skip bài!");
-      }
-      if (cmd === "stop") {
-        q.list = [];
-        q.player.stop(true);
-        getVoiceConnection(msg.guild.id)?.destroy();
-        queues.delete(msg.guild.id);
-        return msg.reply("🛑 Đã dừng nhạc.");
-      }
-      if (cmd === "pause") return q.player.pause(), msg.reply("⏸ Tạm dừng.");
-      if (cmd === "resume") return q.player.unpause(), msg.reply("▶️ Tiếp tục.");
-      if (cmd === "queue") {
-        if (!q.list.length) return msg.reply("📭 Queue trống.");
-        return msg.reply(
-          q.list.map((s, i) => `${i === 0 ? "🎵 Đang phát:" : `${i}.`} ${s.title}`).join("\n")
-        );
-      }
+      switch (cmd) {
+        case "play":
+          if (!args.length) return msg.reply("❌ dùng: !play <tên hoặc link>");
+          addSong(msg, args.join(" "));
+          break;
 
-      // Admin commands
-      if (cmd === "ban") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-        const m = msg.mentions.members.first();
-        if (!m) return msg.reply("❌ Tag người để ban.");
-        await m.ban();
-        return msg.reply("🔨 Đã ban.");
-      }
+        case "skip":
+          q.list.shift();
+          playNext(guildId);
+          msg.reply("⏭ Skip!");
+          break;
 
-      if (cmd === "unban") {
-        if (!isAdmin) return msg.reply("❌ Bạn không phải admin.");
-        await msg.guild.bans.remove(args[0]);
-        return msg.reply("♻️ Đã unban.");
-      }
+        case "stop":
+          q.player.stop();
+          q.conn?.destroy();
+          queues.delete(guildId);
+          msg.reply("🛑 Đã dừng.");
+          break;
 
-    } catch (err) {
-      console.log("CMD ERR:", err);
-      return msg.reply("❌ Lỗi command.");
+        case "queue":
+          if (!q.list.length) return msg.reply("📭 Queue trống.");
+          msg.reply(
+            q.list.map((s, i) => `${i === 0 ? "🎵" : i + "."} ${s.title}`).join("\n")
+          );
+          break;
+
+        case "pause":
+          q.player.pause();
+          msg.reply("⏸ Paused.");
+          break;
+
+        case "resume":
+          q.player.unpause();
+          msg.reply("▶ Resume.");
+          break;
+      }
+    } catch (e) {
+      console.log("CMD ERR:", e);
+      msg.reply("❌ Lỗi command.");
     }
     return;
   }
 
-  // AI CHAT
+  // AI
   if (msg.mentions.users.has(client.user.id)) {
-    const text = content.replace(`<@${client.user.id}>`, "").trim();
-    const reply = await runAI(msg.author.id, text || "Hello?");
+    const txt = content.replace(`<@${client.user.id}>`, "").trim();
+    if (!txt) return msg.reply("Bạn muốn hỏi gì?");
+    const reply = await runGemini(msg.author.id, txt);
     return msg.reply(reply);
   }
 });
 
-// =========================================
 // LOGIN
-// =========================================
 client.login(TOKEN);
