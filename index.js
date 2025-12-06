@@ -1,6 +1,5 @@
 require("dotenv").config();
 const fs = require("fs");
-const { exec } = require("child_process");
 
 const {
   Client,
@@ -35,7 +34,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     await play.setToken({ youtube: { cookie: ck.cookie } });
     console.log("🍪 Cookies YouTube loaded!");
   } catch {
-    console.log("⚠ No cookies file.");
+    console.log("⚠ No youtube-cookies.json found.");
   }
 })();
 
@@ -64,15 +63,16 @@ const historyMap = new Map();
 async function aiRun(uid, text) {
   if (!historyMap.has(uid)) {
     historyMap.set(uid, [
-      { role: "user", parts: [{ text: "Hãy trả lời tự nhiên, giàu cảm xúc." }] }
+      { role: "user", parts: [{ text: "Hãy trả lời tự nhiên, giống người thật." }] }
     ]);
   }
 
   const history = historyMap.get(uid).slice(-8);
-  async function ask(modelName) {
+
+  async function ask(model) {
     try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      return await model.generateContent({
+      const m = genAI.getGenerativeModel({ model });
+      return await m.generateContent({
         contents: [...history, { role: "user", parts: [{ text }] }]
       });
     } catch {
@@ -85,7 +85,7 @@ async function aiRun(uid, text) {
     (await ask(MODEL_2)) ||
     (await ask(MODEL_3));
 
-  if (!res) return "❌ AI quá tải.";
+  if (!res) return "❌ AI đang quá tải.";
 
   const output = res.response.text();
   historyMap.get(uid).push(
@@ -97,35 +97,7 @@ async function aiRun(uid, text) {
 }
 
 // ================================
-// FULL PLAYLIST ENGINE (yt-dlp)
-// ================================
-function getFullPlaylist(url) {
-  return new Promise((resolve, reject) => {
-    exec(`yt-dlp --flat-playlist -J "${url}"`, (err, stdout) => {
-      if (err) return reject(err);
-
-      try {
-        const data = JSON.parse(stdout);
-        const entries = data.entries || [];
-
-        const videos = entries.map(v => ({
-          title: v.title,
-          url: `https://www.youtube.com/watch?v=${v.id}`
-        }));
-
-        resolve({
-          title: data.title || "Playlist",
-          videos
-        });
-      } catch (e) {
-        reject(e);
-      }
-    });
-  });
-}
-
-// ================================
-// MUSIC ENGINE
+// MUSIC ENGINE (NO PLAYLIST VERSION)
 // ================================
 const queues = new Map();
 
@@ -157,15 +129,11 @@ async function playNext(guildId) {
       queues.delete(guildId);
     }, 2 * 60 * 1000);
 
-    q.text?.send("📭 Hết nhạc! Bot rời voice sau 2 phút.");
+    q.text?.send("📭 Hết nhạc! Bot sẽ rời voice sau 2 phút.");
     return;
   }
 
   const song = q.list[0];
-  if (!song.url) {
-    q.list.shift();
-    return playNext(guildId);
-  }
 
   try {
     const s = await play.stream(song.url).catch(() => null);
@@ -178,9 +146,9 @@ async function playNext(guildId) {
     q.player.play(resource);
     q.playing = true;
 
-    q.text?.send(`▶️ **${song.title}**`);
+    q.text?.send(`▶️ **${song.title}** (${song.duration || "?"})`);
   } catch (e) {
-    console.log("ERR stream:", e);
+    console.log("Stream error:", e);
     q.list.shift();
     playNext(guildId);
   }
@@ -191,11 +159,12 @@ async function addSong(msg, query) {
   const q = getQueue(guildId);
 
   if (!msg.member.voice.channel)
-    return msg.reply("❌ Bạn phải vào voice!");
+    return msg.reply("❌ Bạn phải vào voice channel!");
 
   q.text = msg.channel;
   q.voice = msg.member.voice.channel;
 
+  // Tạo kết nối voice nếu chưa có
   if (!q.conn) {
     q.conn = joinVoiceChannel({
       channelId: q.voice.id,
@@ -212,15 +181,19 @@ async function addSong(msg, query) {
   }
 
   let items = [];
+
   try {
     const type = play.yt_validate(query);
 
-    // ==============================
-    // 🎵 VIDEO
-    // ==============================
+    // ❌ CHẶN PLAYLIST HOÀN TOÀN
+    if (type === "playlist") {
+      return msg.reply("❌ Bot KHÔNG hỗ trợ playlist. Hãy gửi video lẻ.");
+    }
+
+    // 🎵 VIDEO LẺ
     if (type === "video") {
       const info = await play.video_info(query).catch(() => null);
-      if (!info) return msg.reply("❌ Video lỗi.");
+      if (!info) return msg.reply("❌ Không tải được video.");
 
       items.push({
         title: info.video_details.title,
@@ -228,33 +201,13 @@ async function addSong(msg, query) {
         duration: info.video_details.durationRaw
       });
 
-      msg.reply(`➕ Thêm: **${info.video_details.title}**`);
+      msg.reply(`➕ Đã thêm: **${info.video_details.title}**`);
     }
 
-    // ==============================
-    // 📃 FULL PLAYLIST (yt-dlp)
-    // ==============================
-    else if (type === "playlist") {
-      msg.reply("📥 Đang tải FULL PLAYLIST…");
-
-      const data = await getFullPlaylist(query).catch(() => null);
-      if (!data) return msg.reply("❌ Playlist lỗi.");
-
-      items = data.videos.map(v => ({
-        title: v.title,
-        url: v.url,
-        duration: "?"
-      }));
-
-      msg.reply(`📃 Playlist **${data.title}** → Thêm **${items.length} bài**`);
-    }
-
-    // ==============================
     // 🔍 SEARCH
-    // ==============================
     else {
       const r = await play.search(query, { limit: 1 });
-      if (!r?.length) return msg.reply("❌ Không tìm thấy bài.");
+      if (!r?.length) return msg.reply("❌ Không tìm thấy bài hát.");
 
       items.push({
         title: r[0].title,
@@ -262,12 +215,12 @@ async function addSong(msg, query) {
         duration: r[0].durationRaw
       });
 
-      msg.reply(`🔍 Thêm: **${r[0].title}**`);
+      msg.reply(`🔍 Tìm thấy: **${r[0].title}**`);
     }
 
   } catch (err) {
     console.log("ERR addSong:", err);
-    return msg.reply("❌ Lỗi tải bài.");
+    return msg.reply("❌ Lỗi khi xử lý bài hát.");
   }
 
   items = items.filter(x => x.url);
@@ -279,13 +232,13 @@ async function addSong(msg, query) {
 }
 
 // ================================
-// READY + STATUS
+// READY
 // ================================
 client.on(Events.ClientReady, c => {
-  console.log("Đăng nhập:", c.user.tag);
+  console.log("Bot logged in as:", c.user.tag);
 
   function update() {
-    const arr = ["nhạc 🎶", "AI 💛", "chill 😎", "Gemini 🤖"];
+    const arr = ["nhạc 🎶", "AI 💛", "Gemini 🤖", "chill 😎"];
     client.user.setPresence({
       activities: [{ name: arr[Math.floor(Math.random() * arr.length)] }]
     });
@@ -305,7 +258,9 @@ client.on(Events.MessageCreate, async msg => {
   const content = msg.content;
   const args = content.split(/ +/);
 
+  // =====================
   // PREFIX COMMANDS
+  // =====================
   if (content.startsWith(PREFIX)) {
     const cmd = args.shift().slice(PREFIX.length).toLowerCase();
     const q = getQueue(msg.guild.id);
@@ -322,21 +277,22 @@ client.on(Events.MessageCreate, async msg => {
         q.player.stop(true);
         getVoiceConnection(msg.guild.id)?.destroy();
         queues.delete(msg.guild.id);
-        return msg.reply("🛑 Dừng.");
+        return msg.reply("🛑 Đã dừng nhạc.");
       }
       if (cmd === "pause") return q.player.pause(), msg.reply("⏸ Tạm dừng.");
       if (cmd === "resume") return q.player.unpause(), msg.reply("▶️ Tiếp tục.");
       if (cmd === "queue") {
-        if (!q.list.length) return msg.reply("📭 Trống.");
+        if (!q.list.length) return msg.reply("📭 Queue trống.");
         return msg.reply(
           q.list.map((s, i) => `${i === 0 ? "🎵 Đang phát" : i + "."} – ${s.title}`).join("\n")
         );
       }
 
+      // Admin
       if (cmd === "ban") {
         if (!isAdmin) return msg.reply("❌ Không phải admin.");
         const m = msg.mentions.members.first();
-        if (!m) return msg.reply("Tag người ban.");
+        if (!m) return msg.reply("Tag người để ban.");
         await m.ban();
         return msg.reply("🔨 Đã ban.");
       }
@@ -354,11 +310,13 @@ client.on(Events.MessageCreate, async msg => {
     return;
   }
 
-  // AI CHAT (mention)
+  // =====================
+  // AI CHAT via Mention
+  // =====================
   if (msg.mentions.users.has(client.user.id)) {
     const txt = content.replace(`<@${client.user.id}>`, "").trim();
-    const out = await aiRun(msg.author.id, txt || "Hello?");
-    return msg.reply(out);
+    const reply = await aiRun(msg.author.id, txt || "Hello?");
+    return msg.reply(reply);
   }
 });
 
