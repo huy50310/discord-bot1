@@ -6,7 +6,7 @@
 
   "scripts": {
     "start": "node index.js",
-    "deploy": "node delop-commands.js"
+    "deploy": "node deplop-commands.js"
   },
 
   "engines": {
