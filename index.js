@@ -1,5 +1,7 @@
 require("dotenv").config();
 const fs = require("fs");
+const { exec } = require("child_process");
+
 const {
   Client,
   GatewayIntentBits,
@@ -19,9 +21,9 @@ const {
 const play = require("play-dl");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// ===========================
+// ================================
 // CONFIG
-// ===========================
+// ================================
 const TOKEN = process.env.TOKEN;
 const PREFIX = process.env.PREFIX || "!";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -37,9 +39,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   }
 })();
 
-// ===========================
+// ================================
 // CLIENT
-// ===========================
+// ================================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -50,26 +52,24 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// ===========================
-// AI ENGINE (SIÊU GỌN)
-// ===========================
-const PRIMARY = "gemini-2.5-flash-lite";
-const SECOND = "gemini-2.5-flash";
-const FALLBACK = "gemini-pro-latest";
+// ================================
+// AI ENGINE (Compact)
+// ================================
+const MODEL_1 = "gemini-2.5-flash-lite";
+const MODEL_2 = "gemini-2.5-flash";
+const MODEL_3 = "gemini-pro-latest";
 
 const historyMap = new Map();
 
 async function aiRun(uid, text) {
   if (!historyMap.has(uid)) {
     historyMap.set(uid, [
-      { role: "user", parts: [{ text: "Hãy trả lời tự nhiên, có cảm xúc." }] }
+      { role: "user", parts: [{ text: "Hãy trả lời tự nhiên, giàu cảm xúc." }] }
     ]);
   }
 
   const history = historyMap.get(uid).slice(-8);
-  let result = null;
-
-  async function tryModel(modelName) {
+  async function ask(modelName) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName });
       return await model.generateContent({
@@ -80,10 +80,14 @@ async function aiRun(uid, text) {
     }
   }
 
-  result = await tryModel(PRIMARY) || await tryModel(SECOND) || await tryModel(FALLBACK);
-  if (!result) return "❌ AI đang quá tải.";
+  const res =
+    (await ask(MODEL_1)) ||
+    (await ask(MODEL_2)) ||
+    (await ask(MODEL_3));
 
-  const output = result.response.text();
+  if (!res) return "❌ AI quá tải.";
+
+  const output = res.response.text();
   historyMap.get(uid).push(
     { role: "user", parts: [{ text }] },
     { role: "model", parts: [{ text: output }] }
@@ -92,9 +96,37 @@ async function aiRun(uid, text) {
   return output;
 }
 
-// ===========================
-// MUSIC ENGINE (SIÊU GỌN)
-// ===========================
+// ================================
+// FULL PLAYLIST ENGINE (yt-dlp)
+// ================================
+function getFullPlaylist(url) {
+  return new Promise((resolve, reject) => {
+    exec(`yt-dlp --flat-playlist -J "${url}"`, (err, stdout) => {
+      if (err) return reject(err);
+
+      try {
+        const data = JSON.parse(stdout);
+        const entries = data.entries || [];
+
+        const videos = entries.map(v => ({
+          title: v.title,
+          url: `https://www.youtube.com/watch?v=${v.id}`
+        }));
+
+        resolve({
+          title: data.title || "Playlist",
+          videos
+        });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+// ================================
+// MUSIC ENGINE
+// ================================
 const queues = new Map();
 
 function getQueue(guildId) {
@@ -103,7 +135,9 @@ function getQueue(guildId) {
       text: null,
       voice: null,
       conn: null,
-      player: createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Stop } }),
+      player: createAudioPlayer({
+        behaviors: { noSubscriber: NoSubscriberBehavior.Stop }
+      }),
       list: [],
       playing: false,
       timeout: null
@@ -123,7 +157,7 @@ async function playNext(guildId) {
       queues.delete(guildId);
     }, 2 * 60 * 1000);
 
-    q.text?.send("📭 Hết nhạc! Sẽ rời voice sau 2 phút.");
+    q.text?.send("📭 Hết nhạc! Bot rời voice sau 2 phút.");
     return;
   }
 
@@ -144,7 +178,7 @@ async function playNext(guildId) {
     q.player.play(resource);
     q.playing = true;
 
-    q.text?.send(`▶️ **${song.title}** (${song.duration})`);
+    q.text?.send(`▶️ **${song.title}**`);
   } catch (e) {
     console.log("ERR stream:", e);
     q.list.shift();
@@ -156,7 +190,9 @@ async function addSong(msg, query) {
   const guildId = msg.guild.id;
   const q = getQueue(guildId);
 
-  if (!msg.member.voice.channel) return msg.reply("❌ Vào voice trước!");
+  if (!msg.member.voice.channel)
+    return msg.reply("❌ Bạn phải vào voice!");
+
   q.text = msg.channel;
   q.voice = msg.member.voice.channel;
 
@@ -179,10 +215,12 @@ async function addSong(msg, query) {
   try {
     const type = play.yt_validate(query);
 
-    // VIDEO
+    // ==============================
+    // 🎵 VIDEO
+    // ==============================
     if (type === "video") {
       const info = await play.video_info(query).catch(() => null);
-      if (!info) return msg.reply("❌ Không tải được video.");
+      if (!info) return msg.reply("❌ Video lỗi.");
 
       items.push({
         title: info.video_details.title,
@@ -193,21 +231,27 @@ async function addSong(msg, query) {
       msg.reply(`➕ Thêm: **${info.video_details.title}**`);
     }
 
-    // PLAYLIST
+    // ==============================
+    // 📃 FULL PLAYLIST (yt-dlp)
+    // ==============================
     else if (type === "playlist") {
-      const pl = await play.playlist_info(query, { incomplete: true });
-      const vids = await pl.all_videos();
+      msg.reply("📥 Đang tải FULL PLAYLIST…");
 
-      items = vids.map(v => ({
+      const data = await getFullPlaylist(query).catch(() => null);
+      if (!data) return msg.reply("❌ Playlist lỗi.");
+
+      items = data.videos.map(v => ({
         title: v.title,
         url: v.url,
-        duration: v.durationRaw
+        duration: "?"
       }));
 
-      msg.reply(`📃 Playlist **${pl.title}** – thêm ${items.length} bài.`);
+      msg.reply(`📃 Playlist **${data.title}** → Thêm **${items.length} bài**`);
     }
 
-    // SEARCH
+    // ==============================
+    // 🔍 SEARCH
+    // ==============================
     else {
       const r = await play.search(query, { limit: 1 });
       if (!r?.length) return msg.reply("❌ Không tìm thấy bài.");
@@ -218,12 +262,12 @@ async function addSong(msg, query) {
         duration: r[0].durationRaw
       });
 
-      msg.reply(`🔍 Tìm thấy: **${r[0].title}**`);
+      msg.reply(`🔍 Thêm: **${r[0].title}**`);
     }
 
   } catch (err) {
     console.log("ERR addSong:", err);
-    return msg.reply("❌ Lỗi khi tải bài hát.");
+    return msg.reply("❌ Lỗi tải bài.");
   }
 
   items = items.filter(x => x.url);
@@ -234,25 +278,26 @@ async function addSong(msg, query) {
   if (!q.playing) playNext(guildId);
 }
 
-// ===========================
-// READY + STATUS SIÊU GỌN
-// ===========================
+// ================================
+// READY + STATUS
+// ================================
 client.on(Events.ClientReady, c => {
-  console.log("Đã đăng nhập:", c.user.tag);
+  console.log("Đăng nhập:", c.user.tag);
 
   function update() {
-    const list = ["chill 🎶", "phục vụ bạn 💛", "AI + Music bot", "Gemini ♥"];
-    const txt = list[Math.floor(Math.random() * list.length)];
-    client.user.setPresence({ activities: [{ name: txt }] });
+    const arr = ["nhạc 🎶", "AI 💛", "chill 😎", "Gemini 🤖"];
+    client.user.setPresence({
+      activities: [{ name: arr[Math.floor(Math.random() * arr.length)] }]
+    });
   }
 
   update();
   setInterval(update, 300000);
 });
 
-// ===========================
-// MESSAGE HANDLER – PREFIX + AI
-// ===========================
+// ================================
+// MESSAGE HANDLER
+// ================================
 client.on(Events.MessageCreate, async msg => {
   if (!msg.inGuild() || msg.author.bot) return;
 
@@ -260,7 +305,7 @@ client.on(Events.MessageCreate, async msg => {
   const content = msg.content;
   const args = content.split(/ +/);
 
-  // PREFIX COMMAND
+  // PREFIX COMMANDS
   if (content.startsWith(PREFIX)) {
     const cmd = args.shift().slice(PREFIX.length).toLowerCase();
     const q = getQueue(msg.guild.id);
@@ -268,30 +313,26 @@ client.on(Events.MessageCreate, async msg => {
     try {
       if (cmd === "play") return addSong(msg, args.join(" "));
       if (cmd === "skip") {
-        if (!q.list.length) return msg.reply("❌ Không có bài.");
         q.list.shift();
         playNext(msg.guild.id);
         return msg.reply("⏭ Skip!");
       }
       if (cmd === "stop") {
         q.list = [];
-        q.playing = false;
         q.player.stop(true);
         getVoiceConnection(msg.guild.id)?.destroy();
         queues.delete(msg.guild.id);
-        return msg.reply("🛑 Dừng & rời voice.");
+        return msg.reply("🛑 Dừng.");
       }
       if (cmd === "pause") return q.player.pause(), msg.reply("⏸ Tạm dừng.");
       if (cmd === "resume") return q.player.unpause(), msg.reply("▶️ Tiếp tục.");
       if (cmd === "queue") {
         if (!q.list.length) return msg.reply("📭 Trống.");
         return msg.reply(
-          "🎵 Queue:\n" +
-          q.list.map((s, i) => `${i === 0 ? "Đang phát" : `${i}.`} – **${s.title}**`).join("\n")
+          q.list.map((s, i) => `${i === 0 ? "🎵 Đang phát" : i + "."} – ${s.title}`).join("\n")
         );
       }
 
-      // ADMIN COMMAND
       if (cmd === "ban") {
         if (!isAdmin) return msg.reply("❌ Không phải admin.");
         const m = msg.mentions.members.first();
@@ -303,7 +344,7 @@ client.on(Events.MessageCreate, async msg => {
       if (cmd === "unban") {
         if (!isAdmin) return msg.reply("❌ Không phải admin.");
         await msg.guild.bans.remove(args[0]);
-        return msg.reply("♻️ Unban!");
+        return msg.reply("♻️ Đã unban.");
       }
 
     } catch (e) {
@@ -313,7 +354,7 @@ client.on(Events.MessageCreate, async msg => {
     return;
   }
 
-  // Mention bot → AI chat
+  // AI CHAT (mention)
   if (msg.mentions.users.has(client.user.id)) {
     const txt = content.replace(`<@${client.user.id}>`, "").trim();
     const out = await aiRun(msg.author.id, txt || "Hello?");
@@ -321,7 +362,7 @@ client.on(Events.MessageCreate, async msg => {
   }
 });
 
-// ===========================
+// ================================
 // LOGIN
-// ===========================
+// ================================
 client.login(TOKEN);
