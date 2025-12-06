@@ -1,2 +1,2 @@
 [phases.setup]
-nixPackages = ["yt-dlp"]
+nixPackages = ["ffmpeg", "opus"]
