@@ -145,44 +145,70 @@ function normalizeURL(url) {
 }
 
 async function playNext(gid) {
-  const q = getQueue(gid);
+const { createAudioResource, StreamType } = require("@discordjs/voice");
+const prism = require("prism-media");
 
-  if (!q.list.length) {
-    q.playing = false;
+async function playNext(guildId) {
+  const queue = queues.get(guildId);
+  if (!queue) return;
 
-    if (q.timeout) clearTimeout(q.timeout);
-    q.timeout = setTimeout(() => {
-      const conn = getVoiceConnection(gid);
-      if (conn) conn.destroy();
-      queues.delete(gid);
-    }, 120000);
+  if (queue.songs.length === 0) {
+    queue.playing = false;
+    if (queue.timeout) clearTimeout(queue.timeout);
 
-    if (q.text) q.text.send("📭 Hết nhạc! Bot sẽ rời voice sau 2 phút.");
+    queue.timeout = setTimeout(() => {
+      if (queue.connection) queue.connection.destroy();
+      queues.delete(guildId);
+    }, 2 * 60 * 1000);
+
+    queue.textChannel?.send("📭 Hết nhạc! Bot sẽ rời voice sau 2 phút.");
     return;
   }
 
-  const song = q.list[0];
-
+  const song = queue.songs[0];
   try {
-    console.log("▶ Streaming:", song.url);
+    // LẤY VIDEO INFO
+    const info = await play.video_basic_info(song.url);
+    const formats = info.streaming_data?.formats || [];
+    const audio = formats.find(f => f.mimeType.includes("audio"));
 
-    const stream = await play.stream(song.url);
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type
+    if (!audio) {
+      throw new Error("Không tìm thấy định dạng audio!");
+    }
+
+    const audioURL = audio.url;
+
+    // GIẢI MÃ BẰNG PRISM
+    const stream = new prism.FFmpeg({
+      args: [
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
+        "-i", audioURL,
+        "-analyzeduration", "0",
+        "-loglevel", "0",
+        "-f", "s16le",
+        "-ar", "48000",
+        "-ac", "2"
+      ]
     });
 
-    q.player.play(resource);
-    q.playing = true;
+    const resource = createAudioResource(stream, {
+      inputType: StreamType.Raw
+    });
 
-    if (q.text)
-      q.text.send(`🎶 Đang phát: **${song.title}** (${song.duration})`);
+    queue.player.play(resource);
+    queue.playing = true;
 
+    queue.textChannel?.send(`🎵 Đang phát: **${song.title}**`);
   } catch (err) {
-    console.log("STREAM FAIL:", err);
-    q.list.shift();
-    playNext(gid);
+    console.error("STREAM ERROR:", err);
+    queue.textChannel?.send("⚠️ Không phát được bài này → Skipping...");
+    queue.songs.shift();
+    playNext(guildId);
   }
 }
+
 
 // FIX STREAM 100%
 async function addSong(msg, query) {
@@ -533,3 +559,4 @@ process.on("uncaughtExceptionMonitor", (err) => {
 });
 
 console.log("✅ index.js V5 FULL đã load hoàn chỉnh!");
+
