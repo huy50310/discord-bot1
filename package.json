@@ -14,7 +14,7 @@
   },
 
   "dependencies": {
-   "youtube-dl-exec": "^2.4.0",
+   "play-dl": "^1.9.7",
     "@google/generative-ai": "^0.21.0",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
