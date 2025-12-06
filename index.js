@@ -256,31 +256,65 @@ async function playNext(guildId) {
 // ADD SONG (NO PLAYLIST, URL CONVERT)
 // =======================
 async function addSong(msg, query) {
-  const guildId = msg.guild.id;
-  const queue = getQueue(guildId);
+  const gid = msg.guild.id;
+  const q = getQueue(gid);
 
-  const voiceChannel = msg.member.voice.channel;
-  if (!voiceChannel) {
-    return msg.reply("❌ Bạn phải vào voice channel trước đã!");
-  }
+  const vc = msg.member.voice.channel;
+  if (!vc) return msg.reply("❌ Bạn phải vào voice trước.");
 
-  queue.textChannel = msg.channel;
-  queue.voiceChannel = voiceChannel;
+  q.textChannel = msg.channel;
+  q.voiceChannel = vc;
 
-  if (!queue.connection) {
-    queue.connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: guildId,
+  // Connect voice nếu chưa có
+  if (!q.connection) {
+    q.connection = joinVoiceChannel({
+      channelId: vc.id,
+      guildId: gid,
       adapterCreator: msg.guild.voiceAdapterCreator,
     });
+    q.connection.subscribe(q.player);
 
-    queue.connection.subscribe(queue.player);
+    q.player.on(AudioPlayerStatus.Idle, () => {
+      q.songs.shift();
+      playNext(gid);
+    });
+  }
 
-    queue.player.on(AudioPlayerStatus.Idle, () => {
-      if (queue.playing) {
-        queue.songs.shift();
-        playNext(guildId);
-      }
+  let videoId;
+
+  // Nếu user gửi URL
+  if (query.startsWith("http")) {
+    const fixed = convertYouTubeURL(query);
+    if (!fixed) return msg.reply("❌ Link không hợp lệ.");
+
+    videoId = fixed.split("v=")[1];
+  }
+
+  // Nếu user search → lấy ID CHUẨN, KHÔNG lấy URL từ search
+  else {
+    const results = await play.search(query, { limit: 1 });
+    if (!results.length) return msg.reply("❌ Không tìm thấy bài hát.");
+
+    videoId = results[0].id;
+  }
+
+  if (!videoId) return msg.reply("❌ Không lấy được ID video.");
+
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Lấy meta bằng ID (CHUẨN NHẤT)
+  const info = await play.video_basic_info(url);
+  const song = {
+    title: info.video_details.title,
+    url: url,
+    duration: info.video_details.durationRaw,
+  };
+
+  q.songs.push(song);
+  msg.reply(`🎵 Đã thêm: **${song.title}**`);
+
+  if (!q.playing) playNext(gid);
+}
     });
   }
 
@@ -750,3 +784,4 @@ client.on(Events.MessageCreate, async (message) => {
 
 // LOGIN
 client.login(TOKEN);
+
