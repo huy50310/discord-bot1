@@ -1,4 +1,5 @@
 require('dotenv').config();
+const express = require("express");
 const {
   Client,
   GatewayIntentBits,
@@ -8,9 +9,18 @@ const {
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// =======================
+// =========================
+//  WEB SERVER (CHỐNG SIGTERM)
+// =========================
+const app = express();
+app.get("/", (req, res) => res.send("Bot is running"));
+app.listen(process.env.PORT || 3000, () => {
+  console.log("🌐 Web server online");
+});
+
+// =========================
 //  GEMINI AI
-// =======================
+// =========================
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const PRIMARY_MODEL = "gemini-2.5-flash-lite";
@@ -30,16 +40,16 @@ async function tryModel(modelName, history, prompt) {
   });
 }
 
-// =======================
+// =========================
 //  AI HANDLER
-// =======================
+// =========================
 async function runGemini(userId, prompt) {
   try {
     if (!userChatHistory.has(userId)) {
       userChatHistory.set(userId, [
-        { 
-          role: "user", 
-          parts: [{ text: "Hãy trả lời thân thiện, giống người thật." }] 
+        {
+          role: "user",
+          parts: [{ text: "Hãy trả lời thân thiện, giống người thật." }]
         }
       ]);
     }
@@ -48,22 +58,10 @@ async function runGemini(userId, prompt) {
     const slimHistory = history.slice(-8);
     let result;
 
-    try {
-      result = await tryModel(PRIMARY_MODEL, slimHistory, prompt);
-    } catch {}
-
-    if (!result) {
-      try {
-        result = await tryModel(SECOND_MODEL, slimHistory, prompt);
-      } catch {}
-    }
-
-    if (!result) {
-      try {
-        result = await tryModel(FALLBACK_MODEL, slimHistory, prompt);
-      } catch {
-        return "❌ AI đang quá tải, thử lại sau nhé!";
-      }
+    try { result = await tryModel(PRIMARY_MODEL, slimHistory, prompt); } catch {}
+    if (!result) try { result = await tryModel(SECOND_MODEL, slimHistory, prompt); } catch {}
+    if (!result) try { result = await tryModel(FALLBACK_MODEL, slimHistory, prompt); } catch {
+      return "❌ AI đang quá tải, thử lại sau nhé!";
     }
 
     const response = result.response.text();
@@ -79,9 +77,9 @@ async function runGemini(userId, prompt) {
   }
 }
 
-// =======================
+// =========================
 //  DISCORD CLIENT
-// =======================
+// =========================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -91,9 +89,9 @@ const client = new Client({
   partials: [Partials.Channel]
 });
 
-// =======================
-//  BOT STATUS (XOAY VÒNG)
-// =======================
+// =========================
+//  BOT STATUS XOAY VÒNG
+// =========================
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Bot Online: ${c.user.tag}`);
 
@@ -115,23 +113,20 @@ client.once(Events.ClientReady, (c) => {
         }
       ]
     });
-  }, 300000); // 5 phút
+  }, 300000);
 });
 
-// =======================
+// =========================
 //  MESSAGE HANDLER
-// =======================
+// =========================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.inGuild()) return;
   if (message.author.bot) return;
 
-  let content = message.content || "";
+  const content = message.content || "";
   const isMentioned = message.mentions.users.has(client.user.id);
   const isAdmin = message.member.permissions.has('Administrator');
 
-  // =====================
-  //   ADMIN LÚC MENTION
-  // =====================
   if (isMentioned) {
     const after = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
     const args = after.split(/ +/);
@@ -170,9 +165,10 @@ client.on(Events.MessageCreate, async (message) => {
       const timeArg = args[1];
       if (!member) return message.reply("⚠ Tag người cần mute.");
       if (!timeArg) return message.reply("⚠ Nhập thời gian: 10s, 5m, 2h");
-      
+
       const match = timeArg.match(/^(\d+)(s|m|h)$/i);
       if (!match) return message.reply("⚠ Sai định dạng!");
+
       const value = parseInt(match[1]);
       const unit = match[2];
       const duration =
@@ -203,5 +199,7 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// LOGIN
+// =========================
+//  LOGIN
+// =========================
 client.login(process.env.TOKEN);
