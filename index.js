@@ -1,4 +1,4 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const {
   Client,
@@ -117,7 +117,28 @@ client.once(Events.ClientReady, (c) => {
 });
 
 // =========================
-//  MESSAGE HANDLER
+// PREFIX COMMAND
+// =========================
+const PREFIX = ":l";
+
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
+
+  if (message.content.startsWith(PREFIX)) {
+    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+    const command = args.shift()?.toLowerCase();
+
+    // :l say <text>
+    if (command === "say") {
+      const text = args.join(" ");
+      if (!text) return message.reply("⚠ Bạn cần nhập nội dung để tôi nói!");
+      return message.channel.send(text);
+    }
+  }
+});
+
+// =========================
+//  MESSAGE HANDLER (TAG BOT)
 // =========================
 client.on(Events.MessageCreate, async (message) => {
   if (!message.inGuild()) return;
@@ -125,7 +146,7 @@ client.on(Events.MessageCreate, async (message) => {
 
   const content = message.content || "";
   const isMentioned = message.mentions.users.has(client.user.id);
-  const isAdmin = message.member.permissions.has('Administrator');
+  const isAdmin = message.member.permissions.has("Administrator");
 
   if (isMentioned) {
     const after = content.replace(new RegExp(`<@!?${client.user.id}>`, "g"), "").trim();
@@ -196,6 +217,37 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     return message.reply("🤖 Bạn muốn hỏi gì?");
+  }
+});
+
+// =========================
+// SLASH COMMAND HANDLER
+// =========================
+client.on(Events.InteractionCreate, async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+
+  // /ping
+  if (interaction.commandName === "ping") {
+    return interaction.reply("🏓 Pong! Bot đang hoạt động.");
+  }
+
+  // /say
+  if (interaction.commandName === "say") {
+    const text = interaction.options.getString("text");
+    return interaction.reply(text);
+  }
+
+  // /announce
+  if (interaction.commandName === "announce") {
+    const text = interaction.options.getString("text");
+    const channel = interaction.options.getChannel("channel");
+
+    try {
+      await channel.send(text);
+      return interaction.reply({ content: "📢 Đã gửi thông báo!", ephemeral: true });
+    } catch (err) {
+      return interaction.reply({ content: "❌ Không thể gửi thông báo!", ephemeral: true });
+    }
   }
 });
 
