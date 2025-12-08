@@ -10,7 +10,7 @@ const {
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // =========================
-//  WEB SERVER (CHỐNG SIGTERM)
+//  WEB SERVER CHỐNG RAILWAY KILL
 // =========================
 const app = express();
 app.get("/", (req, res) => res.send("Bot is running"));
@@ -33,16 +33,10 @@ async function tryModel(modelName, history, prompt) {
   const model = genAI.getGenerativeModel({ model: modelName });
 
   return await model.generateContent({
-    contents: [
-      ...history,
-      { role: "user", parts: [{ text: prompt }] }
-    ]
+    contents: [...history, { role: "user", parts: [{ text: prompt }] }]
   });
 }
 
-// =========================
-//  AI HANDLER
-// =========================
 async function runGemini(userId, prompt) {
   try {
     if (!userChatHistory.has(userId)) {
@@ -55,30 +49,29 @@ async function runGemini(userId, prompt) {
     }
 
     const history = userChatHistory.get(userId);
-    const slimHistory = history.slice(-8);
-    let result;
+    const slim = history.slice(-8);
 
-    try { result = await tryModel(PRIMARY_MODEL, slimHistory, prompt); } catch {}
-    if (!result) try { result = await tryModel(SECOND_MODEL, slimHistory, prompt); } catch {}
-    if (!result) try { result = await tryModel(FALLBACK_MODEL, slimHistory, prompt); } catch {
-      return "❌ AI đang quá tải, thử lại sau nhé!";
+    let result;
+    try { result = await tryModel(PRIMARY_MODEL, slim, prompt); } catch {}
+    if (!result) try { result = await tryModel(SECOND_MODEL, slim, prompt); } catch {}
+    if (!result) {
+      try { result = await tryModel(FALLBACK_MODEL, slim, prompt); }
+      catch { return "❌ AI đang quá tải, thử lại sau nhé!"; }
     }
 
     const response = result.response.text();
-
     history.push({ role: "user", parts: [{ text: prompt }] });
     history.push({ role: "model", parts: [{ text: response }] });
 
     return response;
-
   } catch (err) {
-    console.error("Gemini error:", err);
+    console.error(err);
     return "❌ Lỗi AI rồi!";
   }
 }
 
 // =========================
-//  DISCORD CLIENT
+// DISCORD CLIENT
 // =========================
 const client = new Client({
   intents: [
@@ -90,7 +83,7 @@ const client = new Client({
 });
 
 // =========================
-//  BOT STATUS XOAY VÒNG
+// STATUS XOAY
 // =========================
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Bot Online: ${c.user.tag}`);
@@ -106,18 +99,13 @@ client.once(Events.ClientReady, (c) => {
   setInterval(() => {
     client.user.setPresence({
       status: "online",
-      activities: [
-        {
-          name: statuses[Math.floor(Math.random() * statuses.length)],
-          type: 4
-        }
-      ]
+      activities: [{ name: statuses[Math.floor(Math.random() * statuses.length)], type: 4 }]
     });
   }, 300000);
 });
 
 // =========================
-// PREFIX COMMAND
+// PREFIX COMMANDS
 // =========================
 const PREFIX = ":l";
 
@@ -131,18 +119,19 @@ client.on(Events.MessageCreate, async (message) => {
     // :l say <text>
     if (command === "say") {
       const text = args.join(" ");
-      if (!text) return message.reply("⚠ Bạn cần nhập nội dung để tôi nói!");
+      if (!text) return message.reply("⚠ Bạn cần nhập nội dung!");
+
+      await message.delete().catch(() => {});
       return message.channel.send(text);
     }
   }
 });
 
 // =========================
-//  MESSAGE HANDLER (TAG BOT)
+// ADMIN COMMANDS (TAG BOT)
 // =========================
 client.on(Events.MessageCreate, async (message) => {
-  if (!message.inGuild()) return;
-  if (message.author.bot) return;
+  if (!message.inGuild() || message.author.bot) return;
 
   const content = message.content || "";
   const isMentioned = message.mentions.users.has(client.user.id);
@@ -153,14 +142,14 @@ client.on(Events.MessageCreate, async (message) => {
     const args = after.split(/ +/);
     const command = args.shift()?.toLowerCase();
 
-    // SHUTDOWN
+    // shutdown
     if (command === "shutdown") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       await message.reply("🔌 Bot đang tắt…");
       return process.exit(0);
     }
 
-    // BAN
+    // ban
     if (command === "ban") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       const member = message.mentions.members.first();
@@ -170,7 +159,7 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`🔨 Đã ban **${member.user.tag}**\n📝 ${reason}`);
     }
 
-    // UNBAN
+    // unban
     if (command === "unban") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       const userId = args[0];
@@ -179,29 +168,29 @@ client.on(Events.MessageCreate, async (message) => {
       return message.reply(`♻️ Đã unban **${userId}**`);
     }
 
-    // MUTE
+    // mute
     if (command === "mute") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       const member = message.mentions.members.first();
       const timeArg = args[1];
       if (!member) return message.reply("⚠ Tag người cần mute.");
-      if (!timeArg) return message.reply("⚠ Nhập thời gian: 10s, 5m, 2h");
+      if (!timeArg) return message.reply("⚠ Nhập thời gian: 10s / 5m / 2h");
 
       const match = timeArg.match(/^(\d+)(s|m|h)$/i);
       if (!match) return message.reply("⚠ Sai định dạng!");
 
-      const value = parseInt(match[1]);
+      const num = parseInt(match[1]);
       const unit = match[2];
       const duration =
-        unit === "s" ? value * 1000 :
-        unit === "m" ? value * 60000 :
-                       value * 3600000;
+        unit === "s" ? num * 1000 :
+        unit === "m" ? num * 60000 :
+                       num * 3600000;
 
       await member.timeout(duration);
       return message.reply(`🤐 Đã mute **${member.user.tag}** trong ${timeArg}`);
     }
 
-    // UNMUTE
+    // unmute
     if (command === "unmute") {
       if (!isAdmin) return message.reply("❌ Bạn không phải admin.");
       const member = message.mentions.members.first();
@@ -228,13 +217,15 @@ client.on(Events.InteractionCreate, async interaction => {
 
   // /ping
   if (interaction.commandName === "ping") {
-    return interaction.reply("🏓 Pong! Bot đang hoạt động.");
+    return interaction.reply({ content: "🏓 Pong! Bot đang hoạt động.", ephemeral: true });
   }
 
   // /say
   if (interaction.commandName === "say") {
     const text = interaction.options.getString("text");
-    return interaction.reply(text);
+
+    await interaction.reply({ content: "✔ Đã gửi!", ephemeral: true });
+    return interaction.channel.send(text);
   }
 
   // /announce
@@ -243,15 +234,16 @@ client.on(Events.InteractionCreate, async interaction => {
     const channel = interaction.options.getChannel("channel");
 
     try {
+      await interaction.reply({ content: "📢 Đang gửi thông báo...", ephemeral: true });
       await channel.send(text);
-      return interaction.reply({ content: "📢 Đã gửi thông báo!", ephemeral: true });
-    } catch (err) {
+      return interaction.editReply({ content: "📢 Đã gửi xong!" });
+    } catch {
       return interaction.reply({ content: "❌ Không thể gửi thông báo!", ephemeral: true });
     }
   }
 });
 
 // =========================
-//  LOGIN
+// LOGIN
 // =========================
 client.login(process.env.TOKEN);
